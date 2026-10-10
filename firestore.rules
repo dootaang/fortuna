@@ -1,0 +1,455 @@
+rules_version = '2';
+
+// 종점도시 포르투나 — Firestore 보안 규칙
+//
+// 핵심 약속
+// 1. 잔액·빚이 바뀌는 쓰기는 반드시 같은 묶음 안에서 ledger/{pid}_{seq} 한 장을 만든다.
+//    지갑 규칙은 "새 장부가 함께 생겼는지"만 보고, 장부 규칙이 지갑의 변경 후 상태 전체를 검증한다.
+// 2. 장부는 추가만 가능하다. 관리자도 고치거나 지울 수 없다.
+// 3. 금고·공동 지갑·모금함·재고·보유 물품을 플레이어가 바꿀 때는 lastLedger로 근거 장부를 가리킨다.
+// 4. 주차 계산은 packages/core/src/week.ts와 같다 (KST 월요일 0시).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── 공용 함수 ──
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+    function bindingPath() { return /databases/$(database)/documents/bindings/$(request.auth.uid); }
+    function playerPath(pid) { return /databases/$(database)/documents/players/$(pid); }
+    function walletPath(pid) { return /databases/$(database)/documents/wallets/$(pid); }
+    function ledgerPath(id) { return /databases/$(database)/documents/ledger/$(id); }
+    function configPath() { return /databases/$(database)/documents/config/economy; }
+
+    // 이 기기가 pid 캐릭터에 연결되어 있고, 그 연결이 최신 접속 코드 기준인가.
+    function isPlayer(pid) {
+      return signedIn() && exists(bindingPath())
+        && get(bindingPath()).data.playerId == pid
+        && get(bindingPath()).data.version == get(playerPath(pid)).data.codeVersion;
+    }
+    function myPid() { return get(bindingPath()).data.playerId; }
+
+    // 같은 묶음에서 방금 만들어진 장부인가.
+    function ledgerCreatedNow(id) { return id is string && !exists(ledgerPath(id)) && existsAfter(ledgerPath(id)); }
+
+    function curWeek() {
+      return int(math.floor((request.time.toMillis() + 32400000 - 345600000) / 604800000));
+    }
+
+    // floor(value * bps / 10000) == result, 정수 연산만으로.
+    function isBpsFloor(result, value, bps) {
+      return result is int && result * 10000 <= value * bps && (result + 1) * 10000 > value * bps;
+    }
+
+    function onlyChanged(before, after, keys) { return after.diff(before).affectedKeys().hasOnly(keys); }
+
+    // 주간 사용 횟수: 주가 바뀌었으면 0부터 다시 센다.
+    function countersOk(before, after, kind, limit) {
+      let week = curWeek();
+      let fresh = before.weekIndex != week;
+      let workBase = fresh ? 0 : before.workUsed;
+      let gambleBase = fresh ? 0 : before.gambleUsed;
+      return after.weekIndex == week
+        && after.workUsed == workBase + (kind == 'work' ? 1 : 0)
+        && after.gambleUsed == gambleBase + (kind == 'gamble' ? 1 : 0)
+        && (kind == 'work' ? after.workUsed <= limit : after.gambleUsed <= limit);
+    }
+
+    // ── 관리자와 설정 ──
+    match /admins/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if isAdmin();
+      allow write: if false; // 콘솔에서만 만든다.
+    }
+
+    match /config/{name} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /districts/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // 클라이언트 시계 보정용: 서버 시각을 한 번 찍어 보고 차이를 잰다.
+    match /clocks/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['t']) && request.resource.data.t == request.time;
+    }
+
+    match /adminLog/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.actorUid == request.auth.uid && request.resource.data.at == request.time;
+      allow update, delete: if false;
+    }
+
+    // ── 접속 코드와 연결 ──
+    match /accessCodes/{hash} {
+      allow get: if signedIn();
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /playerSecrets/{pid} {
+      allow read, write: if isAdmin();
+    }
+
+    match /bindings/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if signedIn() && request.auth.uid == uid && validBinding();
+      allow delete: if signedIn() && (request.auth.uid == uid || isAdmin());
+    }
+
+    function validBinding() {
+      let b = request.resource.data;
+      let code = get(/databases/$(database)/documents/accessCodes/$(b.codeHash)).data;
+      return b.keys().hasOnly(['playerId', 'codeHash', 'version', 'boundAt'])
+        && code.playerId == b.playerId
+        && code.version == b.version
+        && get(playerPath(b.playerId)).data.codeVersion == b.version
+        && b.boundAt == request.time;
+    }
+
+    match /players/{pid} {
+      allow read: if isAdmin() || isPlayer(pid);
+      allow write: if isAdmin();
+    }
+
+    // ── 지갑 ──
+    match /wallets/{pid} {
+      allow read: if isAdmin() || isPlayer(pid);
+      allow create: if isAdmin() && request.resource.data == {
+        'playerId': pid, 'balance': 0, 'debt': 0, 'seq': 0, 'arrived': false,
+        'weekIndex': 0, 'workUsed': 0, 'gambleUsed': 0, 'openWager': null
+      };
+      // 신원 확인은 장부 규칙이 한다(장부는 본인 또는 관리자만 만들 수 있다).
+      allow update: if signedIn() && (ledgerBacked(pid) || (isPlayer(pid) && wagerStep()));
+      allow delete: if isAdmin();
+    }
+
+    function ledgerBacked(pid) {
+      return request.resource.data.seq == resource.data.seq + 1
+        && ledgerCreatedNow(pid + '_' + string(request.resource.data.seq));
+    }
+
+    // 진행 중인 판에 결정 하나를 봉인한다. 코인은 움직이지 않는다.
+    function wagerStep() {
+      let before = resource.data.openWager;
+      let after = request.resource.data.openWager;
+      let key = string(before.stepCount + 1);
+      return before != null && after != null
+        && onlyChanged(resource.data, request.resource.data, ['openWager'])
+        && onlyChanged(before, after, ['stepCount', 'steps'])
+        && after.stepCount == before.stepCount + 1
+        && after.stepCount <= 60
+        && after.steps.diff(before.steps).affectedKeys().hasOnly([key])
+        && after.steps[key].keys().hasOnly(['a', 't'])
+        && after.steps[key].a is string
+        && after.steps[key].a.size() <= 24
+        && after.steps[key].t == request.time;
+    }
+
+    // ── 장부 ──
+    match /ledger/{entryId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.playerId == myPid() && isPlayer(resource.data.playerId));
+      allow create: if validLedger(entryId);
+      allow update, delete: if false;
+    }
+
+    function validLedger(entryId) {
+      let e = request.resource.data;
+      let pid = e.playerId;
+      let before = get(walletPath(pid)).data;
+      let after = getAfter(walletPath(pid)).data;
+      return e.keys().hasOnly(['playerId', 'seq', 'type', 'delta', 'debtDelta', 'vaultDelta', 'balanceAfter', 'debtAfter', 'weekIndex', 'actor', 'actorUid', 'memo', 'detail', 'at'])
+        && entryId == pid + '_' + string(e.seq)
+        && e.seq == before.seq + 1
+        && after.seq == e.seq
+        && after.playerId == pid
+        && e.delta is int && e.debtDelta is int && e.vaultDelta is int
+        && after.balance == before.balance + e.delta
+        && after.debt == before.debt + e.debtDelta
+        && after.balance >= 0 && after.debt >= 0
+        && e.balanceAfter == after.balance && e.debtAfter == after.debt
+        && e.at == request.time
+        && e.weekIndex == curWeek()
+        && e.actorUid == request.auth.uid
+        && e.detail is map
+        && e.memo is string
+        && (e.vaultDelta == 0 || vaultMoved(entryId, e.vaultDelta))
+        && (
+          (e.actor == 'admin' && isAdmin() && adminEntry(entryId, e, before, after))
+          || (e.actor == 'player' && isPlayer(pid) && e.memo == '' && playerEntry(entryId, e, before, after))
+        );
+    }
+
+    function vaultMoved(entryId, amount) {
+      let v0 = get(/databases/$(database)/documents/vault/main).data;
+      let v1 = getAfter(/databases/$(database)/documents/vault/main).data;
+      return v1.amount == v0.amount + amount && v1.lastLedger == entryId;
+    }
+
+    function playerEntry(entryId, e, before, after) {
+      return before.arrived == (e.type != 'arrival') && (
+        (e.type == 'arrival' && arrivalOk(e, before, after))
+        || (e.type == 'work' && workOk(e, before, after))
+        || (e.type == 'betOpen' && betOpenOk(entryId, e, before, after))
+        || (e.type == 'betSettle' && betSettleOk(e, before, after))
+        || (e.type == 'skill' && skillOk(e, before, after))
+        || (e.type == 'repay' && repayOk(e, before, after))
+        || (e.type == 'jointDeposit' && jointOk(entryId, e, before, after))
+        || (e.type == 'fundContribution' && fundOk(entryId, e, before, after))
+        || (e.type == 'shop' && shopOk(entryId, e, before, after))
+        || (e.type == 'itemUse' && itemUseOk(entryId, e, before, after, false))
+      );
+    }
+
+    function arrivalOk(e, before, after) {
+      let welcome = get(configPath()).data.welcome;
+      return after.arrived == true
+        && e.detail == {'loan': welcome.loan, 'gateFee': welcome.gateFee, 'debt': welcome.debt}
+        && e.delta == welcome.loan - welcome.gateFee
+        && e.debtDelta == welcome.debt
+        && e.vaultDelta == welcome.gateFee
+        && onlyChanged(before, after, ['balance', 'debt', 'seq', 'arrived']);
+    }
+
+    function workOk(e, before, after) {
+      let work = get(configPath()).data.work;
+      let d = e.detail;
+      let player = get(playerPath(e.playerId)).data;
+      let district = get(/databases/$(database)/documents/districts/$(player.districtId)).data;
+      let bps = district.liberated == true ? 0 : district.deductionBps;
+      return d.keys().hasOnly(['template', 'performance', 'districtId', 'gross', 'deductionBps', 'deduction', 'net'])
+        && d.template is string && d.template.size() <= 20
+        && d.performance is number && d.performance >= 0 && d.performance <= 1
+        && d.districtId == player.districtId
+        && d.gross is int && d.gross >= work.wageMin && d.gross <= work.wageMax
+        && d.deductionBps == bps
+        && isBpsFloor(d.deduction, d.gross, bps)
+        && d.net == d.gross - d.deduction
+        && e.delta == d.net && e.debtDelta == 0 && e.vaultDelta == d.deduction
+        && countersOk(before, after, 'work', work.weeklyLimit)
+        && onlyChanged(before, after, ['balance', 'seq', 'weekIndex', 'workUsed', 'gambleUsed']);
+    }
+
+    function betOpenOk(entryId, e, before, after) {
+      let gambling = get(configPath()).data.gambling;
+      let d = e.detail;
+      let table = gambling.games[d.game][d.venue];
+      let maxBet = d.venue == 'house' ? gambling.houseMaxBet : gambling.alleyMaxBet;
+      return d.keys().hasOnly(['game', 'venue', 'bet'])
+        && before.openWager == null
+        && (d.venue == 'alley' || (d.venue == 'house' && gambling.houseOpen == true))
+        && table.enabled == true
+        && d.bet is int && d.bet >= gambling.minBet && d.bet <= maxBet
+        && e.delta == -d.bet && e.debtDelta == 0
+        && e.vaultDelta == (d.venue == 'house' ? d.bet : 0)
+        && after.openWager == {
+          'wagerId': entryId, 'game': d.game, 'venue': d.venue, 'bet': d.bet,
+          'maxMultiplier': table.maxMultiplier, 'params': table.params,
+          'openedAt': request.time, 'stepCount': 0, 'steps': {}
+        }
+        && countersOk(before, after, 'gamble', gambling.weeklyLimit)
+        && onlyChanged(before, after, ['balance', 'seq', 'weekIndex', 'workUsed', 'gambleUsed', 'openWager']);
+    }
+
+    // 지급액은 판돈 × 최대 배수를 넘을 수 없다. 실제 결과는 관리자 감사(재생)로 검증한다.
+    function betSettleOk(e, before, after) {
+      let w = before.openWager;
+      let d = e.detail;
+      return w != null
+        && d.keys().hasOnly(['wagerId', 'game', 'venue', 'bet', 'params', 'payout', 'openedAt', 'stepCount', 'steps', 'summary'])
+        && d.wagerId == w.wagerId && d.game == w.game && d.venue == w.venue && d.bet == w.bet && d.params == w.params
+        && d.openedAt == w.openedAt && d.stepCount == w.stepCount && d.steps == w.steps
+        && d.summary is string && d.summary.size() <= 200
+        && d.payout is int && d.payout >= 0 && d.payout <= w.bet * w.maxMultiplier
+        && e.delta == d.payout && e.debtDelta == 0
+        && e.vaultDelta == (w.venue == 'house' ? -d.payout : 0)
+        && after.openWager == null
+        && onlyChanged(before, after, ['balance', 'seq', 'openWager']);
+    }
+
+    function skillOk(e, before, after) {
+      let config = get(configPath()).data;
+      let d = e.detail;
+      let skill = get(playerPath(e.playerId)).data.skills[d.skillId];
+      let cumulative = config.skill.cumulative;
+      return d.keys().hasOnly(['skillId', 'skillName', 'baseLevel', 'usedLevel', 'cost', 'borrowed', 'note'])
+        && d.skillName == skill.name && d.baseLevel == skill.level && d.baseLevel >= 1
+        && d.usedLevel is int && d.usedLevel >= d.baseLevel && d.usedLevel < cumulative.size()
+        && d.cost == cumulative[d.usedLevel] - cumulative[d.baseLevel - 1]
+        && d.note is string && d.note.size() <= 200
+        && d.borrowed is int
+        && (d.borrowed == 0
+            || (config.borrow.enabled == true && before.balance < d.cost && d.borrowed == d.cost - before.balance))
+        && e.delta == d.borrowed - d.cost
+        && e.debtDelta - d.borrowed >= 0
+        && isBpsFloor(e.debtDelta - d.borrowed, d.borrowed, config.borrow.feeBps)
+        && e.vaultDelta == 0
+        && onlyChanged(before, after, ['balance', 'debt', 'seq']);
+    }
+
+    function repayOk(e, before, after) {
+      let d = e.detail;
+      return d.keys().hasOnly(['amount'])
+        && d.amount is int && d.amount > 0 && d.amount <= before.debt
+        && e.delta == -d.amount && e.debtDelta == -d.amount && e.vaultDelta == d.amount
+        && onlyChanged(before, after, ['balance', 'debt', 'seq']);
+    }
+
+    function jointOk(entryId, e, before, after) {
+      let d = e.detail;
+      let t0 = get(/databases/$(database)/documents/treasury/joint).data;
+      let t1 = getAfter(/databases/$(database)/documents/treasury/joint).data;
+      return d.keys().hasOnly(['amount'])
+        && d.amount is int && d.amount > 0
+        && e.delta == -d.amount && e.debtDelta == 0 && e.vaultDelta == 0
+        && t1.amount == t0.amount + d.amount && t1.lastLedger == entryId
+        && onlyChanged(before, after, ['balance', 'seq']);
+    }
+
+    function fundOk(entryId, e, before, after) {
+      let d = e.detail;
+      let f0 = get(/databases/$(database)/documents/funds/$(d.fundId)).data;
+      let f1 = getAfter(/databases/$(database)/documents/funds/$(d.fundId)).data;
+      return d.keys().hasOnly(['fundId', 'title', 'amount', 'filled'])
+        && d.title == f0.title
+        && d.amount is int && d.amount > 0
+        && f0.status == 'open' && f0.visible == true
+        && f1.current == f0.current + d.amount && f1.current <= f0.goal
+        && f1.status == (f1.current == f0.goal ? 'filled' : 'open')
+        && d.filled == (f1.status == 'filled')
+        && f1.lastLedger == entryId
+        && e.delta == -d.amount && e.debtDelta == 0 && e.vaultDelta == 0
+        && onlyChanged(before, after, ['balance', 'seq']);
+    }
+
+    function inventoryPath(pid, itemId) { return /databases/$(database)/documents/inventory/$(pid + '_' + itemId); }
+
+    function shopOk(entryId, e, before, after) {
+      let d = e.detail;
+      let i0 = get(/databases/$(database)/documents/shopItems/$(d.itemId)).data;
+      let i1 = getAfter(/databases/$(database)/documents/shopItems/$(d.itemId)).data;
+      let path = inventoryPath(e.playerId, d.itemId);
+      let had = exists(path);
+      let inv1 = getAfter(path).data;
+      let purchased0 = had ? get(path).data.purchased : 0;
+      let quantity0 = had ? get(path).data.quantity : 0;
+      let used0 = had ? get(path).data.used : 0;
+      return d.keys().hasOnly(['itemId', 'itemName', 'category', 'quantity', 'unitPrice', 'total'])
+        && i0.visible == true
+        && d.itemName == i0.name && d.category == i0.category && d.unitPrice == i0.price
+        && d.quantity is int && d.quantity >= 1 && d.quantity <= 99
+        && d.total == d.unitPrice * d.quantity
+        && (i0.stock == null ? i1 == i0 : (i1.stock == i0.stock - d.quantity && i1.stock >= 0 && i1.lastLedger == entryId))
+        && inv1.keys().hasOnly(['playerId', 'itemId', 'itemName', 'category', 'consumable', 'purchased', 'quantity', 'used', 'lastLedger'])
+        && inv1.playerId == e.playerId && inv1.itemId == d.itemId
+        && inv1.itemName == i0.name && inv1.category == i0.category && inv1.consumable == i0.consumable
+        && inv1.purchased == purchased0 + d.quantity
+        && inv1.quantity == quantity0 + d.quantity
+        && inv1.used == used0
+        && (i0.perPlayerLimit == null || inv1.purchased <= i0.perPlayerLimit)
+        && inv1.lastLedger == entryId
+        && e.delta == -d.total && e.debtDelta == 0 && e.vaultDelta == 0
+        && onlyChanged(before, after, ['balance', 'seq']);
+    }
+
+    function itemUseOk(entryId, e, before, after, byAdmin) {
+      let d = e.detail;
+      let path = inventoryPath(e.playerId, d.itemId);
+      let inv0 = get(path).data;
+      let inv1 = getAfter(path).data;
+      return d.keys().hasOnly(['itemId', 'itemName'])
+        && d.itemName == inv0.itemName
+        && (byAdmin || inv0.consumable == true)
+        && inv0.quantity >= 1
+        && onlyChanged(inv0, inv1, ['quantity', 'used', 'lastLedger'])
+        && inv1.quantity == inv0.quantity - 1 && inv1.used == inv0.used + 1
+        && inv1.lastLedger == entryId
+        && e.delta == 0 && e.debtDelta == 0 && e.vaultDelta == 0
+        && onlyChanged(before, after, ['seq']);
+    }
+
+    // 관리자 조정: 사유 메모 필수. 진행 중인 판을 강제로 닫을 수 있다.
+    function adminEntry(entryId, e, before, after) {
+      return e.memo.size() > 0 && e.memo.size() <= 300 && (
+        (e.type == 'adminAdjust'
+          && e.detail.keys().hasOnly(['reason', 'source'])
+          && e.vaultDelta == 0
+          && onlyChanged(before, after, ['balance', 'debt', 'seq', 'openWager', 'arrived'])
+          && (after.openWager == before.openWager || after.openWager == null))
+        || (e.type == 'itemUse' && itemUseOk(entryId, e, before, after, true))
+      );
+    }
+
+    // ── 공용 금고 ──
+    match /vault/{name} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (signedIn() && followsLedger(['amount', 'lastLedger']));
+    }
+
+    match /treasury/{name} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (signedIn() && followsLedger(['amount', 'lastLedger']));
+    }
+
+    match /funds/{fundId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.visible == true);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (signedIn() && followsLedger(['current', 'status', 'lastLedger']));
+    }
+
+    // 바뀐 필드가 keys 안이고, lastLedger가 이번 묶음에서 이 사용자가 만든 장부를 가리킨다.
+    // 금액이 맞는지는 그 장부 규칙이 확인한다.
+    function followsLedger(keys) {
+      let id = request.resource.data.lastLedger;
+      return onlyChanged(resource.data, request.resource.data, keys)
+        && ledgerCreatedNow(id)
+        && getAfter(ledgerPath(id)).data.actorUid == request.auth.uid;
+    }
+
+    // ── 상점 ──
+    match /shopItems/{itemId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.visible == true);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (signedIn() && followsLedger(['stock', 'lastLedger']));
+
+      match /secret/{name} {
+        allow read: if isAdmin() || (signedIn() && exists(bindingPath()) && isPlayer(myPid()) && exists(inventoryPath(myPid(), itemId)));
+        allow write: if isAdmin();
+      }
+    }
+
+    match /inventory/{id} {
+      // get은 아직 없는 문서(첫 구매 전)도 허용해야 하므로 문서 id로 판단한다.
+      allow get: if isAdmin() || (signedIn() && exists(bindingPath()) && id.matches(myPid() + '_.+') && isPlayer(myPid()));
+      allow list: if isAdmin() || (signedIn() && resource.data.playerId == myPid() && isPlayer(resource.data.playerId));
+      allow create, update: if signedIn()
+        && id == request.resource.data.playerId + '_' + request.resource.data.itemId
+        && ledgerCreatedNow(request.resource.data.lastLedger)
+        && getAfter(ledgerPath(request.resource.data.lastLedger)).data.playerId == request.resource.data.playerId;
+      allow delete: if isAdmin();
+    }
+
+    // ── 디스코드 알림 ──
+    // 이벤트 문서는 근거 장부(또는 관리자)가 있어야 만들 수 있다. 중계 Worker가 읽고 sentAt을 찍는다.
+    match /events/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.actorUid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.at == request.time
+        && request.resource.data.sentAt == null
+        && (isAdmin() || (request.resource.data.ledgerId is string
+              && ledgerCreatedNow(request.resource.data.ledgerId)
+              && id == request.resource.data.ledgerId));
+      allow update: if signedIn() && resource.data.actorUid == request.auth.uid
+        && onlyChanged(resource.data, request.resource.data, ['sentAt'])
+        && resource.data.sentAt == null && request.resource.data.sentAt == request.time;
+      allow delete: if isAdmin();
+    }
+  }
+}

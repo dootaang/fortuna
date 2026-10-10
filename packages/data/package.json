@@ -1,0 +1,12 @@
+{
+  "name": "@fortuna/data",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@fortuna/core": "workspace:*",
+    "firebase": "12.19.0"
+  }
+}

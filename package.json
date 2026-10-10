@@ -1,0 +1,26 @@
+{
+  "name": "fortuna",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.16.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @fortuna/web dev",
+    "dev:emu": "firebase emulators:start --only auth,firestore --project demo-fortuna",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --filter !@fortuna/rules-tests test",
+    "test:rules": "node scripts/with-emulators.mjs corepack pnpm --filter @fortuna/rules-tests test",
+    "check": "pnpm typecheck && pnpm test && pnpm test:rules && pnpm build",
+    "deploy": "pnpm build && firebase deploy --only hosting,firestore"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "firebase-tools": "15.32.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}
