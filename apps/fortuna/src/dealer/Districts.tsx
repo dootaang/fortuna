@@ -3,6 +3,7 @@ import { DISTRICTS, type DistrictContent } from "@fortuna/core";
 import { bootstrapCity, setDistrict, type DistrictDoc } from "@fortuna/data";
 import { Frame, Notice, NumberField, TextField, Toggle, useAction } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
+import { relay } from "../relay.ts";
 
 export function Districts() {
   const { districts, players, session } = useDealer();
@@ -27,7 +28,7 @@ export function Districts() {
 }
 
 function DistrictCard({ content, state, residents }: { content: DistrictContent; state: DistrictDoc; residents: string[] }) {
-  const { session } = useDealer();
+  const { session, notify } = useDealer();
   const { busy, run } = useAction();
   const [liberated, setLiberated] = useState(state.liberated);
   const [percent, setPercent] = useState(state.deductionBps / 100);
@@ -49,7 +50,7 @@ function DistrictCard({ content, state, residents }: { content: DistrictContent;
         <TextField label="메모 (기록용)" value={memo} onChange={setMemo} placeholder="예: 간부 격파" />
       </div>
       <button type="button" className="btn btn-gold mt-3 w-full" disabled={busy || !dirty || !Number.isFinite(percent)}
-        onClick={() => void run(() => setDistrict(session, content.id, { liberated, deductionBps: Math.round(percent * 100) }, memo || (liberated && !state.liberated ? "구역 해방" : "공제율 변경")), liberated && !state.liberated ? `${content.name} 구역이 해방되었습니다!` : "저장했습니다.")}>저장</button>
+        onClick={() => void run(() => setDistrict(session, content.id, { liberated, deductionBps: Math.round(percent * 100) }, memo || (liberated && !state.liberated ? "구역 해방" : "공제율 변경")), liberated && !state.liberated ? `${content.name} 구역이 해방되었습니다!` : "저장했습니다.").then((eventId) => relay(notify.relayUrl, eventId))}>저장</button>
     </Frame>
   );
 }

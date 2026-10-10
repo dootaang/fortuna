@@ -6,6 +6,7 @@ import { usePlayer } from "../session/player.tsx";
 import { Coins, Frame, Notice, Ornament, PageTitle, cx, useAction, useToast } from "../ui/kit.tsx";
 import { summarize } from "./summaries.ts";
 import { GameView } from "./views.tsx";
+import { relay } from "../relay.ts";
 
 interface Finished { game: GameId; bet: number; payout: number; state: unknown; params: unknown; }
 
@@ -37,6 +38,7 @@ export default function TablePage() {
     try {
       const result = await settleBet(session, (final) => summarize(game, final), notify.bigGamble);
       setFinished({ game, bet: result.bet, payout: result.payout, state: live?.state, params: live?.params });
+      if (venue === "house" && Math.abs(result.payout - result.bet) >= notify.bigGamble) relay(notify.relayUrl, result.ledgerId);
     } catch (error) {
       setSettleError(friendlyError(error));
     } finally { settling.current = false; }

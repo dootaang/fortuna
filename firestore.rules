@@ -446,7 +446,7 @@ service cloud.firestore {
         && (isAdmin() || (request.resource.data.ledgerId is string
               && ledgerCreatedNow(request.resource.data.ledgerId)
               && id == request.resource.data.ledgerId));
-      allow update: if signedIn() && resource.data.actorUid == request.auth.uid
+      allow update: if signedIn() && (resource.data.actorUid == request.auth.uid || isAdmin())
         && onlyChanged(resource.data, request.resource.data, ['sentAt'])
         && resource.data.sentAt == null && request.resource.data.sentAt == request.time;
       allow delete: if isAdmin();

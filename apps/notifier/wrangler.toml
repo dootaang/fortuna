@@ -1,0 +1,10 @@
+# 포르투나 디스코드 알림 중계 Worker.
+# 웹훅 주소는 비밀값으로만 등록한다:  corepack pnpm --filter @fortuna/notifier exec wrangler secret put DISCORD_WEBHOOK_URL
+name = "fortuna-notifier"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "fortuna-472e3"
+# 쉼표로 구분. 앱이 배포된 주소만 허용한다.
+ALLOWED_ORIGINS = "https://fortuna-472e3.web.app,https://fortuna-472e3.firebaseapp.com,http://127.0.0.1:5173,http://localhost:5173"

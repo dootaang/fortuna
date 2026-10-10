@@ -3,12 +3,13 @@ import { TEXT, arrivalSlip, fill } from "@fortuna/core";
 import { arrive } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { Coins, Frame, Ornament, useAction } from "../ui/kit.tsx";
+import { relay } from "../relay.ts";
 
 type Step = "letter" | "envelope" | "receipt";
 
 /** 도착 연출: 지배인의 편지 → 환영 봉투 → 차용증과 개찰구 요금 → 입장. */
 export function Arrival() {
-  const { session, player, content, config } = usePlayer();
+  const { session, player, content, config, notify } = usePlayer();
   const [step, setStep] = useState<Step>("letter");
   const { busy, run } = useAction();
   const welcome = config.welcome, slip = arrivalSlip(welcome);
@@ -59,7 +60,7 @@ export function Arrival() {
             <p className="mt-1">{fill(TEXT.arrival.debtLine, { amount: welcome.debt })}</p>
           </div>
           <p className="mt-4 text-center text-sm text-mist">{fill(TEXT.arrival.startLine, { amount: slip.delta })}</p>
-          <button type="button" className="btn btn-gold mt-5 w-full" disabled={busy} onClick={() => void run(() => arrive(session))}>
+          <button type="button" className="btn btn-gold mt-5 w-full" disabled={busy} onClick={() => void run(() => arrive(session)).then((id) => relay(notify.relayUrl, id))}>
             {busy ? "개찰구 통과 중…" : TEXT.arrival.enter}
           </button>
         </Frame>

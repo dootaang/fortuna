@@ -11,3 +11,4 @@ export * from "./work/games.ts";
 export * from "./content/districts.ts";
 export * from "./content/text.ts";
 export * from "./content/games.ts";
+export * from "./content/notify.ts";

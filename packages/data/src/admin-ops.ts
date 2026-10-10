@@ -9,8 +9,9 @@ import { refs, type EventKind, type FundDoc, type PlayerDoc, type ShopItemDoc, t
 
 const DEFAULT_DEDUCTION_BPS = 5_000;
 
-function adminEvent(session: Session, kind: EventKind, payload: Record<string, string | number | boolean>) {
-  return addDoc(refs.events(session.db), { kind, ledgerId: null, playerId: null, actorUid: session.uid, at: serverTimestamp() as unknown as Timestamp, sentAt: null, payload });
+async function adminEvent(session: Session, kind: EventKind, payload: Record<string, string | number | boolean>): Promise<string> {
+  const ref = await addDoc(refs.events(session.db), { kind, ledgerId: null, playerId: null, actorUid: session.uid, at: serverTimestamp() as unknown as Timestamp, sentAt: null, payload });
+  return ref.id;
 }
 
 async function log(session: Session, kind: string, target: string, amount: number, memo: string) {
@@ -108,23 +109,24 @@ export async function adminUseItem(session: Session, pid: string, itemId: string
   });
 }
 
-export async function saveEconomy(session: Session, config: EconomyConfig, previous: EconomyConfig | null): Promise<EconomyConfig> {
+/** Returns the id of a "house opened" event to relay, if this save opened the house. */
+export async function saveEconomy(session: Session, config: EconomyConfig, previous: EconomyConfig | null): Promise<string | null> {
   const finalized = finalizeEconomy(config);
   await setDoc(refs.config(session.db), finalized);
-  if (previous && !previous.gambling.houseOpen && finalized.gambling.houseOpen) await adminEvent(session, "houseOpen", {});
-  return finalized;
+  return previous && !previous.gambling.houseOpen && finalized.gambling.houseOpen ? adminEvent(session, "houseOpen", {}) : null;
 }
 
 export async function saveNotify(session: Session, config: NotifyConfig): Promise<void> {
   await setDoc(refs.notify(session.db), normalizeNotify(config));
 }
 
-export async function setDistrict(session: Session, id: string, next: { liberated: boolean; deductionBps: number }, memo: string): Promise<void> {
+/** Returns the id of a liberation event to relay, if this change liberated the district. */
+export async function setDistrict(session: Session, id: string, next: { liberated: boolean; deductionBps: number }, memo: string): Promise<string | null> {
   const ref = refs.district(session.db, id), before = (await getDoc(ref)).data();
   if (!Number.isInteger(next.deductionBps) || next.deductionBps < 0 || next.deductionBps > 10_000) throw new FortunaError("bps", "공제율은 0~100% 사이여야 합니다.");
   await setDoc(ref, next);
   await log(session, next.liberated && !before?.liberated ? "liberate" : "district", id, next.deductionBps, memo);
-  if (next.liberated && !before?.liberated) await adminEvent(session, "liberation", { districtId: id });
+  return next.liberated && !before?.liberated ? adminEvent(session, "liberation", { districtId: id }) : null;
 }
 
 export async function adjustVault(session: Session, delta: number, memo: string): Promise<void> {
@@ -180,5 +182,14 @@ export async function saveFund(session: Session, fundId: string | null, input: F
 export async function deleteFund(session: Session, fundId: string): Promise<void> { await deleteDoc(refs.fund(session.db, fundId)); }
 
 /** Mark an admin-authored event as needing relay (used for manual announcements). */
-export async function announce(session: Session, kind: EventKind, payload: Record<string, string | number | boolean>): Promise<void> { await adminEvent(session, kind, payload); }
+export async function announce(session: Session, kind: EventKind, payload: Record<string, string | number | boolean>): Promise<string> { return adminEvent(session, kind, payload); }
+
+/** Ask the notifier Worker to post one event. Never throws: notifications are best-effort. */
+export async function relayEvent(relayUrl: string, idToken: string, eventId: string): Promise<string> {
+  if (!relayUrl) return "no-relay";
+  try {
+    const response = await fetch(relayUrl, { method: "POST", headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ eventId }) });
+    return ((await response.json()) as { status?: string; error?: string }).status ?? "error";
+  } catch { return "unreachable"; }
+}
 

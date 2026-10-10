@@ -93,7 +93,7 @@ export function normalizeEconomy(raw: unknown): EconomyConfig {
 /** Recompute every derived field. Call right before writing config/economy. */
 export function finalizeEconomy(config: EconomyConfig): EconomyConfig { return normalizeEconomy(config); }
 
-export const NOTIFY_EVENTS = ["arrival", "bigGamble", "skill", "shop", "fundFilled", "liberation", "repaid"] as const;
+export const NOTIFY_EVENTS = ["arrival", "bigGamble", "skill", "shop", "fundFilled", "liberation", "repaid", "houseOpen"] as const;
 export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
 
 /** Stored at config/notify. */
@@ -106,7 +106,7 @@ export interface NotifyConfig {
 }
 
 export const DEFAULT_NOTIFY: NotifyConfig = {
-  enabled: { arrival: true, bigGamble: true, skill: true, shop: true, fundFilled: true, liberation: true, repaid: true },
+  enabled: { arrival: true, bigGamble: true, skill: true, shop: true, fundFilled: true, liberation: true, repaid: true, houseOpen: true },
   bigGamble: 1_000,
   relayUrl: "",
 };

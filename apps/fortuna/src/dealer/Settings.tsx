@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { GAMES, GAME_CONTENT, GAME_IDS, NOTIFY_EVENTS, VENUES, cumulativeCosts, normalizeEconomy, type EconomyConfig, type GameId, type NotifyConfig, type NotifyEvent, type Venue } from "@fortuna/core";
-import { bootstrapCity, saveEconomy, saveNotify } from "@fortuna/data";
-import { Frame, Notice, NumberField, TextField, Toggle, cx, useAction } from "../ui/kit.tsx";
+import { limit, orderBy, query, where } from "firebase/firestore";
+import { bootstrapCity, refs, saveEconomy, saveNotify } from "@fortuna/data";
+import { useLiveQuery } from "../session/live.ts";
+import { Empty, Frame, Notice, NumberField, TextField, Toggle, cx, formatDate, useAction } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
+import { relay } from "../relay.ts";
 
 const NOTIFY_LABELS: Record<NotifyEvent, string> = {
-  arrival: "새 승객 도착", bigGamble: "하우스의 큰 승패", skill: "특기 결제", shop: "상점 구매 (비밀 내용 제외)", fundFilled: "모금함 달성", liberation: "구역 해방", repaid: "빚 완제",
+  arrival: "새 승객 도착", bigGamble: "하우스의 큰 승패", skill: "특기 결제", shop: "상점 구매 (비밀 내용 제외)", fundFilled: "모금함 달성", liberation: "구역 해방", repaid: "빚 완제", houseOpen: "하우스 개방",
 };
 
 export function Settings() {
@@ -29,7 +32,7 @@ export function Settings() {
 }
 
 function EconomyEditor({ config }: { config: EconomyConfig }) {
-  const { session } = useDealer();
+  const { session, notify } = useDealer();
   const { busy, run } = useAction();
   const [draft, setDraft] = useState<EconomyConfig>(config);
   const [costsText, setCostsText] = useState(config.skill.costs.slice(1).join(", "));
@@ -46,7 +49,7 @@ function EconomyEditor({ config }: { config: EconomyConfig }) {
   return (
     <Frame>
       <SectionTitle title="경제 설정">
-        <button type="button" className="btn btn-gold btn-sm" disabled={busy || !dirty || !costsValid} onClick={() => void run(save, "저장했습니다. 플레이어 화면에 바로 반영됩니다.")}>저장</button>
+        <button type="button" className="btn btn-gold btn-sm" disabled={busy || !dirty || !costsValid} onClick={() => void run(save, "저장했습니다. 플레이어 화면에 바로 반영됩니다.").then((eventId) => relay(notify.relayUrl, eventId))}>저장</button>
       </SectionTitle>
       <div className="grid gap-5 lg:grid-cols-2">
         <fieldset className="space-y-2">
@@ -156,6 +159,36 @@ function NotifyEditor({ notify }: { notify: NotifyConfig }) {
           <p className="text-xs text-mist">웹훅 주소 자체는 Worker의 비밀값에만 저장합니다. 이 칸에는 Worker 주소만 넣습니다. 설정 방법은 docs/DEALER-GUIDE.md를 보십시오.</p>
         </div>
       </div>
+      <PendingEvents />
     </Frame>
+  );
+}
+
+const KIND_LABELS: Record<string, string> = { ...NOTIFY_LABELS, houseOpen: "하우스 개방" };
+
+/** Events the relay has not stamped yet: offline players, a missing Worker, or a Discord hiccup. */
+function PendingEvents() {
+  const { session, notify, players } = useDealer();
+  const pending = useLiveQuery(query(refs.events(session.db), where("sentAt", "==", null), orderBy("at", "asc"), limit(30)), "dealer:events:pending");
+  const rows = pending.status === "ready" ? pending.data : [];
+  const names = new Map(players.map((row) => [row.id, row.data.name]));
+  return (
+    <div className="mt-6">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="deco-caps">보내지 못한 알림 {rows.length ? `(${rows.length})` : ""}</p>
+        {rows.length > 0 && <button type="button" className="btn btn-dark btn-sm" disabled={!notify.relayUrl} onClick={() => rows.forEach((row) => relay(notify.relayUrl, row.id))}>모두 다시 보내기</button>}
+      </div>
+      {rows.length === 0 ? <Empty>밀린 알림이 없습니다.</Empty> : (
+        <ul className="divide-y divide-gold-400/15 text-sm">
+          {rows.map((row) => (
+            <li key={row.id} className="flex items-center justify-between gap-2 py-1.5">
+              <span>{KIND_LABELS[row.data.kind] ?? row.data.kind} · {row.data.playerId ? names.get(row.data.playerId) ?? "" : "딜러"} <span className="text-xs text-mist">{row.data.at ? formatDate(row.data.at.toMillis()) : ""}</span></span>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={!notify.relayUrl} onClick={() => relay(notify.relayUrl, row.id)}>보내기</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!notify.relayUrl && <p className="mt-2 text-xs text-mist">중계 주소를 저장하면 보낼 수 있습니다.</p>}
+    </div>
   );
 }

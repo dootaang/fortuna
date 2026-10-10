@@ -166,3 +166,15 @@ describe("work content", () => {
     expect(fill("{name} 님 {amount}코인", { name: "가", amount: 1500 })).toBe("가 님 1,500코인");
   });
 });
+
+describe("discord lines", () => {
+  it("formats events in the manager's voice and never leaks secrets", async () => {
+    const { formatNotification } = await import("../src/index.ts");
+    expect(formatNotification({ kind: "arrival", playerName: "에이든", districtId: "wuxia", detail: { debt: 1500 }, payload: {} }, 1000)).toContain("무협 구역");
+    expect(formatNotification({ kind: "bigGamble", playerName: "에이든", districtId: "", detail: { bet: 2000, payout: 0, game: "blackjack" }, payload: {} }, 1000)).toContain("2,000코인을 잃었습니다");
+    expect(formatNotification({ kind: "bigGamble", playerName: "에이든", districtId: "", detail: { bet: 500, payout: 950, game: "odd-even" }, payload: {} }, 1000)).toBeNull();
+    expect(formatNotification({ kind: "skill", playerName: "에이든", districtId: "", detail: { skillName: "쾌검", usedLevel: 6, cost: 4300, borrowed: 3700, note: "" }, payload: {} }, 1000)).toContain("3,700코인은 지배인에게");
+    expect(formatNotification({ kind: "shop", playerName: "에이든", districtId: "", detail: { itemName: "간부의 약점", secret: "비밀" }, payload: {} }, 1000)).not.toContain("비밀");
+    expect(formatNotification({ kind: "liberation", playerName: "", districtId: "", detail: {}, payload: { districtId: "horror" } }, 1000)).toContain("괴담");
+  });
+});

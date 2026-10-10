@@ -5,6 +5,7 @@ import { depositJoint, friendlyError, paySkill, refs, repayDebt, useItem, type I
 import { usePlayer } from "../session/player.tsx";
 import { useLiveQuery, type Row } from "../session/live.ts";
 import { Coins, Empty, Frame, Modal, NumberField, PageTitle, Stat, TextField, cx, formatDate, useAction } from "../ui/kit.tsx";
+import { relay } from "../relay.ts";
 
 export default function WalletPage() {
   const { wallet, config, session, player } = usePlayer();
@@ -30,7 +31,7 @@ export default function WalletPage() {
 }
 
 function SkillPayment() {
-  const { player, config, wallet, session } = usePlayer();
+  const { player, config, wallet, session, notify } = usePlayer();
   const { busy, run } = useAction();
   const skills = Object.entries(player.skills).sort((a, b) => a[1].name.localeCompare(b[1].name, "ko"));
   const [skillId, setSkillId] = useState(skills[0]?.[0] ?? "");
@@ -80,7 +81,7 @@ function SkillPayment() {
           )}
           <button
             type="button" className="btn btn-gold mt-3 w-full" disabled={busy || (shortfall > 0 && !canBorrow)}
-            onClick={() => void run(() => paySkill(session, { skillId, usedLevel: used, note, borrow: shortfall > 0 }), TEXT.skill.paid).then((id) => { if (id) { setNote(""); setBoost(0); } })}
+            onClick={() => void run(() => paySkill(session, { skillId, usedLevel: used, note, borrow: shortfall > 0 }), TEXT.skill.paid).then((id) => { if (id) { setNote(""); setBoost(0); relay(notify.relayUrl, id); } })}
           >
             {shortfall > 0 ? "빌려서 결제" : "결제"} · {cost.toLocaleString("ko-KR")}
           </button>
@@ -91,7 +92,7 @@ function SkillPayment() {
 }
 
 function Repay() {
-  const { wallet, session } = usePlayer();
+  const { wallet, session, notify } = usePlayer();
   const { busy, run } = useAction();
   const max = Math.min(wallet.debt, wallet.balance);
   const [amount, setAmount] = useState(Math.min(500, max));
@@ -105,7 +106,7 @@ function Repay() {
         <button type="button" className="btn btn-ghost" onClick={() => setAmount(max)}>전액</button>
       </div>
       <button type="button" className="btn btn-gold mt-3 w-full" disabled={busy || !Number.isInteger(amount) || amount <= 0 || amount > max}
-        onClick={() => void run(() => repayDebt(session, amount), amount === wallet.debt ? TEXT.repay.cleared : TEXT.repay.done)}>상환</button>
+        onClick={() => { const clears = amount === wallet.debt; void run(() => repayDebt(session, amount), clears ? TEXT.repay.cleared : TEXT.repay.done).then((id) => { if (clears) relay(notify.relayUrl, id); }); }}>상환</button>
     </Frame>
   );
 }

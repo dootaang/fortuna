@@ -5,6 +5,7 @@ import { SHOP_CATEGORIES, SHOP_CATEGORY_LABELS, buyItem, contributeFund, friendl
 import { usePlayer } from "../session/player.tsx";
 import { useLiveQuery, type Row } from "../session/live.ts";
 import { Coins, Empty, Frame, Modal, Notice, PageTitle, cx, useAction } from "../ui/kit.tsx";
+import { relay } from "../relay.ts";
 
 export default function ShopPage() {
   const { session } = usePlayer();
@@ -36,7 +37,7 @@ export default function ShopPage() {
 }
 
 function ItemCard({ row, owned }: { row: Row<ShopItemDoc>; owned: InventoryDoc | undefined }) {
-  const { session, wallet } = usePlayer();
+  const { session, wallet, notify } = usePlayer();
   const { busy, run } = useAction();
   const [quantity, setQuantity] = useState(1);
   const [secret, setSecret] = useState<string | null>(null);
@@ -74,7 +75,7 @@ function ItemCard({ row, owned }: { row: Row<ShopItemDoc>; owned: InventoryDoc |
                 {Array.from({ length: maxQuantity }, (_, index) => <option key={index} value={index + 1}>{index + 1}개</option>)}
               </select>
             )}
-            <button type="button" className="btn btn-gold flex-1" disabled={busy || !canBuy} onClick={() => void run(() => buyItem(session, row.id, quantity), TEXT.shop.bought)}>
+            <button type="button" className="btn btn-gold flex-1" disabled={busy || !canBuy} onClick={() => void run(() => buyItem(session, row.id, quantity), TEXT.shop.bought).then((id) => relay(notify.relayUrl, id))}>
               {soldOut ? TEXT.shop.soldOut : busy ? "포장 중…" : `구매 · ${(item.price * quantity).toLocaleString("ko-KR")}`}
             </button>
           </div>
@@ -89,7 +90,7 @@ function ItemCard({ row, owned }: { row: Row<ShopItemDoc>; owned: InventoryDoc |
 }
 
 function FundCard({ row }: { row: Row<FundDoc> }) {
-  const { session, wallet } = usePlayer();
+  const { session, wallet, notify } = usePlayer();
   const { busy, run } = useAction();
   const fund = row.data, room = Math.max(0, fund.goal - fund.current), ratio = Math.min(1, fund.current / Math.max(1, fund.goal));
   const [amount, setAmount] = useState(Math.min(100, room));
@@ -108,7 +109,7 @@ function FundCard({ row }: { row: Row<FundDoc> }) {
         <div className="mt-3 flex gap-2">
           <input type="number" inputMode="numeric" className="field num" min={1} max={room} value={amount} onChange={(event) => setAmount(Math.max(0, Math.floor(Number(event.target.value) || 0)))} aria-label="보탤 금액" />
           <button type="button" className="btn btn-gold shrink-0" disabled={busy || amount <= 0 || amount > room || amount > wallet.balance}
-            onClick={() => void run(async () => { const result = await contributeFund(session, row.id, amount); return result; }, "모금함에 보탰습니다.")}>보태기</button>
+            onClick={() => void run(() => contributeFund(session, row.id, amount), "모금함에 보탰습니다.").then((result) => { if (result?.filled) relay(notify.relayUrl, result.ledgerId); })}>보태기</button>
         </div>
       ) : <p className="mt-2 text-center text-sm text-gold-200">{TEXT.fund.filled}</p>}
     </Frame>
