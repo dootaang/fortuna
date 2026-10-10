@@ -29,7 +29,7 @@ export default function WorkHub() {
         {WORK_TEMPLATES.map((template) => {
           const skin = content.work[template];
           const card = (
-            <Frame as="article" className="h-full">
+            <Frame as="div" className="h-full">
               <div className="flex items-start gap-3">
                 <span aria-hidden="true" className="text-3xl">{skin.icon}</span>
                 <div>

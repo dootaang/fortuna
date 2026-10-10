@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { Link } from "react-router";
 import { signInAnonymously } from "firebase/auth";
 import { TEXT } from "@fortuna/core";
@@ -6,21 +6,23 @@ import { bindAccessCode, friendlyError } from "@fortuna/data";
 import { auth, clock, db } from "../firebase.ts";
 import { Frame, Notice, Ornament } from "../ui/kit.tsx";
 
-export function Gate({ revoked }: { revoked: boolean }) {
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(revoked ? TEXT.gate.revoked : null);
+export interface GateState { code: string; error: string | null; busy: boolean; }
+
+/** State is owned by PlayerRoot so signing in (which re-renders the root) does not wipe it. */
+export function Gate({ state: [state, setState], revoked }: { state: [GateState, Dispatch<SetStateAction<GateState>>]; revoked: boolean }) {
+  const error = state.error ?? (revoked ? TEXT.gate.revoked : null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!code.trim()) return;
-    setBusy(true); setError(null);
+    if (!state.code.trim()) return;
+    setState((current) => ({ ...current, busy: true, error: null }));
     try {
       const user = auth.currentUser ?? (await signInAnonymously(auth)).user;
-      await bindAccessCode({ db, uid: user.uid, clock }, code);
+      await bindAccessCode({ db, uid: user.uid, clock }, state.code);
+      setState({ code: "", error: null, busy: false });
     } catch (failure) {
-      setError(friendlyError(failure));
-    } finally { setBusy(false); }
+      setState((current) => ({ ...current, busy: false, error: friendlyError(failure) }));
+    }
   }
 
   return (
@@ -40,12 +42,12 @@ export function Gate({ revoked }: { revoked: boolean }) {
             <span className="sr-only">접속 코드</span>
             <input
               className="field text-center font-deco text-lg tracking-[0.2em] uppercase"
-              value={code} onChange={(event) => setCode(event.target.value)} placeholder="FRT-XXXX-XXXX-XXXX"
+              value={state.code} onChange={(event) => setState((current) => ({ ...current, code: event.target.value }))} placeholder="FRT-XXXX-XXXX-XXXX"
               autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} inputMode="text"
             />
           </label>
           {error && <Notice tone="error">{error}</Notice>}
-          <button type="submit" className="btn btn-gold w-full" disabled={busy || !code.trim()}>{busy ? "확인 중…" : TEXT.gate.submit}</button>
+          <button type="submit" className="btn btn-gold w-full" disabled={state.busy || !state.code.trim()}>{state.busy ? "확인 중…" : TEXT.gate.submit}</button>
         </form>
       </Frame>
       <p className="mt-6 text-center text-xs text-mist">{TEXT.greeting} · <Link to="/dealer" className="underline-offset-2 hover:underline">딜러 입구</Link></p>

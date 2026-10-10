@@ -19,7 +19,7 @@ export const GAME_CONTENT: Readonly<Record<GameId, GameContent>> = {
     rules: ["다음 카드가 지금 카드보다 높을지 낮을지 고릅니다.", "같은 숫자가 나오면 집니다.", "맞힐 때마다 배수가 오르고, 언제든 멈춰서 받을 수 있습니다."],
   },
   blackjack: {
-    title: "스물하나", icon: "♠️", tier: 1, tagline: "21을 넘지 않게, 딜러보다 높게.",
+    title: "스물하나", icon: "♠", tier: 1, tagline: "21을 넘지 않게, 딜러보다 높게.",
     rules: ["카드를 더 받거나(히트) 멈춥니다(스탠드).", "21을 넘으면 즉시 집니다.", "딜러는 멈춘 뒤에 두 번째 카드를 받고, 17 이상이 될 때까지 받습니다.", "처음 두 장으로 21이면 '스물하나' 배당을 받습니다."],
   },
   "last-train": {
@@ -39,7 +39,7 @@ export const GAME_CONTENT: Readonly<Record<GameId, GameContent>> = {
     rules: ["딜러와 번갈아 상대 패에서 한 장씩 뽑습니다.", "같은 숫자 두 장은 버립니다.", "마지막까지 조커를 들고 있으면 집니다."],
   },
   "draw-poker": {
-    title: "포커", icon: "♦️", tier: 3, tagline: "다섯 장, 한 번의 교환, 딜러와의 승부.",
+    title: "포커", icon: "♦", tier: 3, tagline: "다섯 장, 한 번의 교환, 딜러와의 승부.",
     rules: ["카드 다섯 장을 받고, 남길 카드를 골라 한 번 교환합니다.", "딜러도 교환한 뒤 족보를 비교합니다."],
   },
 };

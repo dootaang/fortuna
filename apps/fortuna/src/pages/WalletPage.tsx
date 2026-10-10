@@ -13,7 +13,7 @@ export default function WalletPage() {
     <div className="space-y-4">
       <PageTitle eyebrow="WALLET" title={`${player.name}의 지갑`} />
       <Frame>
-        <div className="grid grid-cols-2 divide-x divide-gold-400/20 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-y-2 sm:grid-cols-4 sm:divide-x sm:divide-gold-400/20">
           <Stat label={TEXT.wallet.balance} tone="gold"><Coins value={wallet.balance} /></Stat>
           <Stat label={TEXT.wallet.debt} tone={wallet.debt ? "ruby" : "jade"}><span className="num">{wallet.debt.toLocaleString("ko-KR")}</span></Stat>
           <Stat label={TEXT.wallet.workLeft}><span className="num">{Math.max(0, config.work.weeklyLimit - usedThisWeek(wallet, "work", now))}</span></Stat>

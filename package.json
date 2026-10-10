@@ -15,10 +15,15 @@
     "test": "pnpm -r --filter !@fortuna/rules-tests test",
     "test:rules": "node scripts/with-emulators.mjs corepack pnpm --filter @fortuna/rules-tests test",
     "check": "pnpm typecheck && pnpm test && pnpm test:rules && pnpm build",
-    "deploy": "pnpm build && firebase deploy --only hosting,firestore"
+    "deploy": "pnpm build && firebase deploy --only hosting,firestore",
+    "test:e2e": "node scripts/with-emulators.mjs corepack pnpm exec playwright test"
   },
   "devDependencies": {
+    "@fortuna/core": "workspace:*",
+    "@fortuna/data": "workspace:*",
+    "@playwright/test": "1.61.1",
     "@types/node": "24.13.3",
+    "firebase": "12.19.0",
     "firebase-tools": "15.32.1",
     "typescript": "7.0.2",
     "vitest": "4.1.10"

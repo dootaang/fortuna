@@ -31,6 +31,7 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+@layer base {
 html, body, #root { min-height: 100%; }
 body {
   margin: 0;
@@ -46,6 +47,9 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /* 한국어는 어절 단위로 줄바꿈 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 ::selection { background: var(--color-gold-400); color: var(--color-ink); }
@@ -53,6 +57,9 @@ body {
 button, input, select, textarea { font: inherit; color: inherit; }
 input, select, textarea { min-width: 0; }
 
+}
+
+@layer components {
 /* ── 제목 ── */
 .deco-title { font-family: var(--font-display); font-weight: 800; letter-spacing: 0.02em; color: var(--color-gold-200); text-wrap: balance; }
 .deco-caps { font-family: var(--font-deco); letter-spacing: 0.24em; text-transform: uppercase; font-size: 0.72rem; color: var(--color-gold-300); }
@@ -157,6 +164,8 @@ input, select, textarea { min-width: 0; }
 .die i { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #1b1b1b; place-self: center; }
 .die.red i { background: #b3261e; }
 .die.held { box-shadow: 0 0 0 3px var(--color-gold-400), 0 6px 14px -6px #000c; transform: translateY(-4px); }
+
+}
 
 @keyframes card-in { from { opacity: 0; transform: translateY(-10px) rotateY(80deg); } to { opacity: 1; transform: none; } }
 @keyframes die-in { from { opacity: 0; transform: rotate(-120deg) scale(0.4); } to { opacity: 1; transform: none; } }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { deleteDoc, type Timestamp } from "firebase/firestore";
+import { type Timestamp } from "firebase/firestore";
 import { DEFAULT_ECONOMY, DEFAULT_NOTIFY, districtContent, normalizeEconomy, normalizeNotify, type DistrictContent, type EconomyConfig, type NotifyConfig, type Wallet } from "@fortuna/core";
 import { refs, syncClock, type DistrictDoc, type PlayerDoc, type PlayerSession, type PoolDoc } from "@fortuna/data";
 import { clock, db } from "../firebase.ts";
@@ -30,30 +30,32 @@ export type BindingState =
   | { status: "unbound"; reason: "none" | "revoked" }
   | { status: "bound"; value: PlayerContextValue };
 
-/** Everything a bound anonymous browser needs, live. */
-export function usePlayerBinding(uid: string): BindingState {
-  const binding = useLiveDoc(refs.binding(db, uid), `binding:${uid}`);
+/** Everything a bound anonymous browser needs, live. `uid` null = not signed in. */
+export function usePlayerBinding(uid: string | null): BindingState {
+  const binding = useLiveDoc(uid ? refs.binding(db, uid) : null, `binding:${uid}`, true);
   const pid = binding.status === "ready" && binding.data ? binding.data.playerId : null;
-  const player = useLiveDoc(pid ? refs.player(db, pid) : null, `player:${pid}`);
-  const wallet = useLiveDoc(pid ? refs.wallet(db, pid) : null, `wallet:${pid}`);
-  const config = useLiveDoc(pid ? refs.config(db) : null, `config:${pid}`);
-  const notify = useLiveDoc(pid ? refs.notify(db) : null, `notify:${pid}`);
+  // The version is part of the key so a re-entered code resubscribes after a revoked one.
+  const version = binding.status === "ready" && binding.data ? binding.data.version : 0;
+  const player = useLiveDoc(pid ? refs.player(db, pid) : null, `player:${pid}:${version}`);
+  const wallet = useLiveDoc(pid ? refs.wallet(db, pid) : null, `wallet:${pid}:${version}`);
+  const config = useLiveDoc(pid ? refs.config(db) : null, `config:${pid}:${version}`);
+  const notify = useLiveDoc(pid ? refs.notify(db) : null, `notify:${pid}:${version}`);
   const districtId = player.status === "ready" ? player.data?.districtId ?? null : null;
-  const district = useLiveDoc(districtId ? refs.district(db, districtId) : null, `district:${districtId}`);
-  const vault = useLiveDoc(pid ? refs.vault(db) : null, `vault:${pid}`);
-  const treasury = useLiveDoc(pid ? refs.treasury(db) : null, `treasury:${pid}`);
+  const district = useLiveDoc(districtId ? refs.district(db, districtId) : null, `district:${districtId}:${version}`);
+  const vault = useLiveDoc(pid ? refs.vault(db) : null, `vault:${pid}:${version}`);
+  const treasury = useLiveDoc(pid ? refs.treasury(db) : null, `treasury:${pid}:${version}`);
   const [synced, setSynced] = useState(false);
 
   useEffect(() => {
-    if (!pid) return;
+    if (!pid || !uid) return;
     void syncClock(db, uid, clock).catch(() => undefined).finally(() => setSynced(true));
   }, [pid, uid]);
 
-  // A reissued code makes the old binding unreadable for the player document: drop it and ask again.
+  // A reissued code bumps codeVersion; the old binding can no longer read the player.
   const revoked = player.status === "error";
-  useEffect(() => { if (revoked) void deleteDoc(refs.binding(db, uid)).catch(() => undefined); }, [revoked, uid]);
 
   return useMemo<BindingState>(() => {
+    if (!uid) return { status: "unbound", reason: "none" };
     if (binding.status === "loading") return { status: "loading" };
     if (binding.status === "error" || !binding.data) return { status: "unbound", reason: "none" };
     if (revoked) return { status: "unbound", reason: "revoked" };

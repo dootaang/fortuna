@@ -39,7 +39,7 @@ export function VenueList({ venue }: { venue: Venue }) {
               const info = GAME_CONTENT[id];
               return (
                 <Link key={id} to={`/table/${venue}/${id}`} className="block rise">
-                  <Frame as="article" className="h-full">
+                  <Frame as="div" className="h-full">
                     <div className="flex items-start gap-3">
                       <span aria-hidden="true" className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-gold-400/60 bg-ink/60 text-2xl">{info.icon}</span>
                       <div>

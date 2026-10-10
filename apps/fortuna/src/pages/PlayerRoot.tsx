@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink, Outlet, Link } from "react-router";
 import { signOut } from "firebase/auth";
 import { TEXT } from "@fortuna/core";
@@ -5,22 +6,19 @@ import { auth } from "../firebase.ts";
 import { useAuthUser } from "../session/auth.ts";
 import { PlayerProvider, usePlayer, usePlayerBinding } from "../session/player.tsx";
 import { Coins, Frame, Splash, cx } from "../ui/kit.tsx";
-import { Gate } from "./Gate.tsx";
+import { Gate, type GateState } from "./Gate.tsx";
 import { Arrival } from "./Arrival.tsx";
 
 export function PlayerRoot() {
   const authState = useAuthUser();
+  const user = authState.status === "ready" ? authState.user : null;
+  const binding = usePlayerBinding(user?.isAnonymous ? user.uid : null);
+  // Lives here so the gate keeps its input and error across auth/binding re-renders.
+  const gate = useState<GateState>({ code: "", error: null, busy: false });
   if (authState.status === "loading") return <Splash />;
-  const user = authState.user;
-  if (!user) return <Gate revoked={false} />;
-  if (!user.isAnonymous) return <DealerSignedIn email={user.email ?? ""} />;
-  return <BoundPlayer uid={user.uid} />;
-}
-
-function BoundPlayer({ uid }: { uid: string }) {
-  const binding = usePlayerBinding(uid);
+  if (user && !user.isAnonymous) return <DealerSignedIn email={user.email ?? ""} />;
+  if (!user || binding.status === "unbound" || gate[0].busy) return <Gate state={gate} revoked={binding.status === "unbound" && binding.reason === "revoked"} />;
   if (binding.status === "loading") return <Splash />;
-  if (binding.status === "unbound") return <Gate revoked={binding.reason === "revoked"} />;
   return (
     <PlayerProvider value={binding.value}>
       {binding.value.wallet.arrived ? <PlayerShell /> : <Arrival />}

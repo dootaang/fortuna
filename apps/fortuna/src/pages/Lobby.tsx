@@ -31,7 +31,7 @@ export function Lobby() {
       )}
 
       <Frame className="rise">
-        <div className="grid grid-cols-2 divide-x divide-gold-400/20 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-y-2 sm:grid-cols-4 sm:divide-x sm:divide-gold-400/20">
           <Stat label="잔액" tone="gold"><Coins value={wallet.balance} /></Stat>
           <Stat label="빚" tone={wallet.debt > 0 ? "ruby" : "jade"}><span className="num">{wallet.debt.toLocaleString("ko-KR")}</span></Stat>
           <Stat label="남은 일"><span className="num">{workLeft}</span><span className="text-sm text-mist"> / {config.work.weeklyLimit}</span></Stat>
@@ -68,7 +68,7 @@ export function Lobby() {
 function VenueCard({ to, icon, title, line, meta, locked }: { to: string; icon: string; title: string; line: string; meta: string; locked?: boolean }) {
   return (
     <Link to={to} className={cx("group block rise", locked && "opacity-80")}>
-      <Frame as="article" className="h-full transition group-hover:border-gold-300">
+      <Frame as="div" className="h-full transition group-hover:border-gold-300">
         <div className="flex items-start gap-3">
           <span aria-hidden="true" className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-gold-400/60 bg-ink/60 text-xl text-gold-300">{locked ? "🔒" : icon}</span>
           <div className="min-w-0">

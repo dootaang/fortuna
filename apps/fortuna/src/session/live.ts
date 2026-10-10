@@ -3,13 +3,20 @@ import { onSnapshot, type DocumentReference, type Query } from "firebase/firesto
 
 export type Live<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "error"; error: Error };
 
-/** Subscribe to one document. `null` ref = idle. Missing documents resolve to `null`. */
-export function useLiveDoc<T>(ref: DocumentReference<T> | null, key: string): Live<T | null> {
+/**
+ * Subscribe to one document. `null` ref = idle. Missing documents resolve to `null`.
+ * With `committedOnly`, local writes still waiting for the server count as loading —
+ * needed when other reads depend on this document passing security rules.
+ */
+export function useLiveDoc<T>(ref: DocumentReference<T> | null, key: string, committedOnly = false): Live<T | null> {
   const [state, setState] = useState<Live<T | null>>({ status: "loading" });
   useEffect(() => {
     if (!ref) { setState({ status: "loading" }); return undefined; }
     setState({ status: "loading" });
-    return onSnapshot(ref, (snapshot) => setState({ status: "ready", data: snapshot.exists() ? snapshot.data() : null }), (error) => setState({ status: "error", error }));
+    return onSnapshot(ref, { includeMetadataChanges: committedOnly }, (snapshot) => {
+      if (committedOnly && snapshot.metadata.hasPendingWrites) return;
+      setState({ status: "ready", data: snapshot.exists() ? snapshot.data() : null });
+    }, (error) => setState({ status: "error", error }));
     // Re-subscribe only when `key` changes; callers rebuild refs every render.
   }, [key]);
   return state;
