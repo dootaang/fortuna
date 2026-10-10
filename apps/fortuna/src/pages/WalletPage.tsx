@@ -1,0 +1,213 @@
+import { useMemo, useState } from "react";
+import { getDoc, limit, orderBy, query, where, type Timestamp } from "firebase/firestore";
+import { LEDGER_LABELS, TEXT, borrowDebt, fill, skillCost, usedThisWeek, type LedgerEntry } from "@fortuna/core";
+import { depositJoint, friendlyError, paySkill, refs, repayDebt, useItem, type InventoryDoc } from "@fortuna/data";
+import { usePlayer } from "../session/player.tsx";
+import { useLiveQuery, type Row } from "../session/live.ts";
+import { Coins, Empty, Frame, Modal, NumberField, PageTitle, Stat, TextField, cx, formatDate, useAction } from "../ui/kit.tsx";
+
+export default function WalletPage() {
+  const { wallet, config, session, player } = usePlayer();
+  const now = session.clock.now();
+  return (
+    <div className="space-y-4">
+      <PageTitle eyebrow="WALLET" title={`${player.name}의 지갑`} />
+      <Frame>
+        <div className="grid grid-cols-2 divide-x divide-gold-400/20 sm:grid-cols-4">
+          <Stat label={TEXT.wallet.balance} tone="gold"><Coins value={wallet.balance} /></Stat>
+          <Stat label={TEXT.wallet.debt} tone={wallet.debt ? "ruby" : "jade"}><span className="num">{wallet.debt.toLocaleString("ko-KR")}</span></Stat>
+          <Stat label={TEXT.wallet.workLeft}><span className="num">{Math.max(0, config.work.weeklyLimit - usedThisWeek(wallet, "work", now))}</span></Stat>
+          <Stat label={TEXT.wallet.gambleLeft}><span className="num">{Math.max(0, config.gambling.weeklyLimit - usedThisWeek(wallet, "gamble", now))}</span></Stat>
+        </div>
+      </Frame>
+      <SkillPayment />
+      <Repay />
+      <Inventory />
+      <JointWallet />
+      <History />
+    </div>
+  );
+}
+
+function SkillPayment() {
+  const { player, config, wallet, session } = usePlayer();
+  const { busy, run } = useAction();
+  const skills = Object.entries(player.skills).sort((a, b) => a[1].name.localeCompare(b[1].name, "ko"));
+  const [skillId, setSkillId] = useState(skills[0]?.[0] ?? "");
+  const skill = player.skills[skillId];
+  const [boost, setBoost] = useState(0);
+  const [note, setNote] = useState("");
+  const maxLevel = config.skill.cumulative.length - 1;
+  const used = skill ? Math.min(maxLevel, skill.level + boost) : 0;
+  const cost = skill ? skillCost(skill.level, used, config.skill.cumulative) : 0;
+  const shortfall = Math.max(0, cost - wallet.balance);
+  const canBorrow = config.borrow.enabled && shortfall > 0;
+
+  if (!skills.length) return <Frame><h2 className="deco-title text-lg">{TEXT.skill.title}</h2><Empty>{TEXT.skill.noSkills}</Empty></Frame>;
+  return (
+    <Frame>
+      <h2 className="deco-title text-lg">{TEXT.skill.title}</h2>
+      <p className="text-sm text-mist">{TEXT.skill.intro}</p>
+      <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="특기">
+        {skills.map(([id, entry]) => (
+          <button key={id} type="button" role="radio" aria-checked={id === skillId} className={cx("btn btn-sm", id === skillId ? "btn-gold" : "btn-dark")} onClick={() => { setSkillId(id); setBoost(0); }}>
+            {entry.name} <span className="num">{entry.level}점</span>
+          </button>
+        ))}
+      </div>
+      {skill && (
+        <>
+          <div className="mt-4">
+            <p className="field-label">웃돈 단계 (사용 점수)</p>
+            <div className="flex flex-wrap gap-1.5">
+              {Array.from({ length: Math.max(1, maxLevel - skill.level + 1) }, (_, step) => (
+                <button key={step} type="button" className={cx("btn btn-sm min-w-12 num", step === boost ? "btn-gold" : "btn-dark")} onClick={() => setBoost(step)}>{skill.level + step}점</button>
+              ))}
+            </div>
+          </div>
+          <ul className="mt-3 space-y-0.5 text-sm">
+            {Array.from({ length: used - skill.level + 1 }, (_, step) => {
+              const level = skill.level + step, price = config.skill.costs[level] ?? 0;
+              return <li key={level} className="flex justify-between text-mist"><span>{step === 0 ? `기본 ${level}점` : `웃돈 ${level}점`}</span><Coins value={price} /></li>;
+            })}
+            <li className="flex justify-between border-t border-gold-400/30 pt-1 text-base font-bold text-gold-200"><span>총액</span><Coins value={cost} /></li>
+          </ul>
+          <div className="mt-3"><TextField label="장면 메모 (선택)" value={note} onChange={setNote} maxLength={200} placeholder="예: 간부의 검을 받아낸다" /></div>
+          {shortfall > 0 && (
+            <p className="mt-3 text-sm text-[#f2b3aa]">
+              {canBorrow ? fill(TEXT.skill.borrowOffer, { amount: shortfall, debt: borrowDebt(shortfall, config.borrow.feeBps) }) : "잔액이 부족합니다."}
+            </p>
+          )}
+          <button
+            type="button" className="btn btn-gold mt-3 w-full" disabled={busy || (shortfall > 0 && !canBorrow)}
+            onClick={() => void run(() => paySkill(session, { skillId, usedLevel: used, note, borrow: shortfall > 0 }), TEXT.skill.paid).then((id) => { if (id) { setNote(""); setBoost(0); } })}
+          >
+            {shortfall > 0 ? "빌려서 결제" : "결제"} · {cost.toLocaleString("ko-KR")}
+          </button>
+        </>
+      )}
+    </Frame>
+  );
+}
+
+function Repay() {
+  const { wallet, session } = usePlayer();
+  const { busy, run } = useAction();
+  const max = Math.min(wallet.debt, wallet.balance);
+  const [amount, setAmount] = useState(Math.min(500, max));
+  if (wallet.debt === 0) return <Frame><h2 className="deco-title text-lg">{TEXT.repay.title}</h2><p className="mt-1 text-sm text-[#a9ecc9]">{TEXT.repay.cleared}</p></Frame>;
+  return (
+    <Frame>
+      <h2 className="deco-title text-lg">{TEXT.repay.title}</h2>
+      <p className="text-sm text-mist">{TEXT.repay.intro} 남은 빚 <Coins value={wallet.debt} /></p>
+      <div className="mt-3 flex items-end gap-2">
+        <div className="flex-1"><NumberField label="상환 금액" value={amount} onChange={setAmount} min={1} max={max} /></div>
+        <button type="button" className="btn btn-ghost" onClick={() => setAmount(max)}>전액</button>
+      </div>
+      <button type="button" className="btn btn-gold mt-3 w-full" disabled={busy || !Number.isInteger(amount) || amount <= 0 || amount > max}
+        onClick={() => void run(() => repayDebt(session, amount), amount === wallet.debt ? TEXT.repay.cleared : TEXT.repay.done)}>상환</button>
+    </Frame>
+  );
+}
+
+function Inventory() {
+  const { session } = usePlayer();
+  const owned = useLiveQuery(query(refs.inventories(session.db), where("playerId", "==", session.pid)), `wallet:inv:${session.pid}`);
+  const rows = (owned.status === "ready" ? owned.data : []).filter((row) => row.data.quantity > 0 || row.data.used > 0).sort((a, b) => a.data.itemName.localeCompare(b.data.itemName, "ko"));
+  return (
+    <Frame>
+      <h2 className="deco-title text-lg">{TEXT.wallet.items}</h2>
+      {rows.length ? <ul className="mt-2 divide-y divide-gold-400/15">{rows.map((row) => <InventoryRow key={row.id} row={row} />)}</ul> : <Empty>{TEXT.wallet.noItems}</Empty>}
+    </Frame>
+  );
+}
+
+function InventoryRow({ row }: { row: Row<InventoryDoc> }) {
+  const { session } = usePlayer();
+  const { busy, run } = useAction();
+  const [secret, setSecret] = useState<string | null>(null);
+  const item = row.data;
+  async function openSecret() {
+    try { setSecret((await getDoc(refs.secret(session.db, item.itemId))).data()?.text ?? ""); } catch (error) { setSecret(friendlyError(error)); }
+  }
+  return (
+    <li className="flex items-center justify-between gap-2 py-2">
+      <div className="min-w-0">
+        <p className="truncate font-bold">{item.itemName}</p>
+        <p className="text-xs text-mist">보유 {item.quantity}{item.used ? ` · 사용 ${item.used}` : ""}</p>
+      </div>
+      <div className="flex shrink-0 gap-1.5">
+        {item.category === "rumor" && <button type="button" className="btn btn-ghost btn-sm" onClick={() => void openSecret()}>열람</button>}
+        {item.consumable && item.quantity > 0 && <button type="button" className="btn btn-gold btn-sm" disabled={busy} onClick={() => void run(() => useItem(session, item.itemId), `${item.itemName}을(를) 사용했습니다.`)}>{TEXT.shop.use}</button>}
+      </div>
+      <Modal open={secret !== null} onClose={() => setSecret(null)} title={item.itemName}>
+        <p className="whitespace-pre-line rounded-sm border border-gold-400/30 bg-ink/50 p-3 font-display leading-7">{secret || "이 물품에는 비밀 내용이 없습니다."}</p>
+      </Modal>
+    </li>
+  );
+}
+
+function JointWallet() {
+  const { session, treasury, wallet } = usePlayer();
+  const { busy, run } = useAction();
+  const [amount, setAmount] = useState(100);
+  return (
+    <Frame>
+      <h2 className="deco-title text-lg">{TEXT.joint.title}</h2>
+      <p className="text-sm text-mist">{TEXT.joint.intro}</p>
+      <p className="deco-title my-2 text-center text-2xl"><Coins value={treasury?.amount ?? 0} /></p>
+      <div className="flex items-end gap-2">
+        <div className="flex-1"><NumberField label="넣을 금액" value={amount} onChange={setAmount} min={1} max={wallet.balance} /></div>
+        <button type="button" className="btn btn-gold" disabled={busy || !Number.isInteger(amount) || amount <= 0 || amount > wallet.balance}
+          onClick={() => void run(() => depositJoint(session, amount), "공동 지갑에 넣었습니다.")}>넣기</button>
+      </div>
+    </Frame>
+  );
+}
+
+function History() {
+  const { session } = usePlayer();
+  const rows = useLiveQuery(query(refs.ledgers(session.db), where("playerId", "==", session.pid), orderBy("seq", "desc"), limit(30)), `wallet:ledger:${session.pid}`);
+  const entries = useMemo(() => (rows.status === "ready" ? rows.data : []), [rows]);
+  return (
+    <Frame>
+      <h2 className="deco-title text-lg">{TEXT.wallet.history}</h2>
+      {rows.status === "error" ? <Empty>기록을 불러오지 못했습니다.</Empty> : entries.length ? (
+        <ul className="mt-2 divide-y divide-gold-400/15 text-sm">
+          {entries.map(({ id, data }) => <HistoryRow key={id} entry={data} />)}
+        </ul>
+      ) : <Empty>아직 기록이 없습니다.</Empty>}
+    </Frame>
+  );
+}
+
+export function describeEntry(entry: LedgerEntry<Timestamp>): string {
+  const detail = entry.detail as Record<string, any>;
+  switch (entry.type) {
+    case "work": return `임금 ${detail.gross} − 지배인 몫 ${detail.deduction}`;
+    case "betOpen": return `${detail.venue === "house" ? "하우스" : "뒷골목"} 판돈`;
+    case "betSettle": return detail.summary || "정산";
+    case "skill": return `${detail.skillName} ${detail.baseLevel}→${detail.usedLevel}점${detail.borrowed ? ` (차입 ${detail.borrowed})` : ""}${detail.note ? ` · ${detail.note}` : ""}`;
+    case "shop": return `${detail.itemName} ×${detail.quantity}`;
+    case "itemUse": return `${detail.itemName} 사용`;
+    case "fundContribution": return `${detail.title}`;
+    case "adminAdjust": return entry.memo;
+    case "arrival": return `환영 봉투 ${detail.loan} · 개찰구 ${detail.gateFee}`;
+    default: return "";
+  }
+}
+
+function HistoryRow({ entry }: { entry: LedgerEntry<Timestamp> }) {
+  return (
+    <li className="flex items-start justify-between gap-3 py-2">
+      <div className="min-w-0">
+        <p><span className="chip mr-1.5 !py-0 text-[0.7rem]">{LEDGER_LABELS[entry.type]}</span><span className="text-mist">{entry.at ? formatDate(entry.at.toMillis()) : ""}</span></p>
+        <p className="mt-0.5 truncate text-xs text-mist">{describeEntry(entry)}</p>
+      </div>
+      <div className="shrink-0 text-right">
+        {entry.delta !== 0 && <p className={cx("font-bold", entry.delta > 0 ? "text-[#a9ecc9]" : "text-[#f2b3aa]")}><Coins value={entry.delta} signed /></p>}
+        {entry.debtDelta !== 0 && <p className="text-xs text-[#f2b3aa]">빚 {entry.debtDelta > 0 ? "+" : ""}{entry.debtDelta.toLocaleString("ko-KR")}</p>}
+      </div>
+    </li>
+  );
+}

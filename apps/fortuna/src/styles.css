@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+/* ── 포르투나 아르데코 토큰: 에메랄드 바탕, 금, 검정 ── */
+@theme {
+  --color-felt-950: #031510;
+  --color-felt-900: #06231a;
+  --color-felt-800: #0a3326;
+  --color-felt-700: #0f4634;
+  --color-felt-600: #155a43;
+  --color-gold-50: #fbf3d5;
+  --color-gold-200: #f1d98a;
+  --color-gold-300: #e6c564;
+  --color-gold-400: #d4af37;
+  --color-gold-500: #b38f22;
+  --color-gold-700: #6f5713;
+  --color-ink: #0b0c0b;
+  --color-ivory: #f3ead2;
+  --color-mist: #a9bfb4;
+  --color-ruby: #c4473a;
+  --color-jade: #4fc08d;
+  --font-display: "Nanum Myeongjo", "Noto Serif KR", Georgia, serif;
+  --font-deco: "Cinzel", "Nanum Myeongjo", Georgia, serif;
+  --font-sans: "Noto Sans KR", "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+  --gold-line: color-mix(in oklab, var(--color-gold-400) 70%, transparent);
+  --gold-faint: color-mix(in oklab, var(--color-gold-400) 22%, transparent);
+  --panel: color-mix(in oklab, var(--color-felt-950) 72%, transparent);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html, body, #root { min-height: 100%; }
+body {
+  margin: 0;
+  background-color: var(--color-felt-900);
+  background-image:
+    radial-gradient(120% 70% at 50% -10%, color-mix(in oklab, var(--color-felt-600) 70%, transparent), transparent 60%),
+    repeating-linear-gradient(135deg, transparent 0 22px, color-mix(in oklab, var(--color-gold-400) 3%, transparent) 22px 23px),
+    repeating-linear-gradient(45deg, transparent 0 22px, color-mix(in oklab, var(--color-gold-400) 3%, transparent) 22px 23px);
+  background-attachment: fixed;
+  color: var(--color-ivory);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection { background: var(--color-gold-400); color: var(--color-ink); }
+:focus-visible { outline: 2px solid var(--color-gold-300); outline-offset: 2px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+input, select, textarea { min-width: 0; }
+
+/* ── 제목 ── */
+.deco-title { font-family: var(--font-display); font-weight: 800; letter-spacing: 0.02em; color: var(--color-gold-200); text-wrap: balance; }
+.deco-caps { font-family: var(--font-deco); letter-spacing: 0.24em; text-transform: uppercase; font-size: 0.72rem; color: var(--color-gold-300); }
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+/* ── 장식선: ◆ 가운데 두고 양쪽으로 금선 ── */
+.ornament { display: flex; align-items: center; gap: 0.75rem; color: var(--color-gold-400); }
+.ornament::before, .ornament::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--gold-line), transparent); }
+.ornament > span { font-size: 0.7rem; letter-spacing: 0.4em; }
+
+/* ── 아르데코 액자: 이중 금선 + 계단형 모서리 ── */
+.deco-frame {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--gold-line);
+  box-shadow: inset 0 0 0 4px color-mix(in oklab, var(--color-felt-950) 80%, transparent), inset 0 0 0 5px var(--gold-faint), 0 18px 40px -24px #000;
+  border-radius: 4px;
+  backdrop-filter: blur(2px);
+}
+.deco-frame::before, .deco-frame::after {
+  content: ""; position: absolute; width: 14px; height: 14px; pointer-events: none;
+  border: 1px solid var(--color-gold-400);
+}
+.deco-frame::before { top: -5px; left: -5px; border-right: 0; border-bottom: 0; }
+.deco-frame::after { bottom: -5px; right: -5px; border-left: 0; border-top: 0; }
+
+/* 부채꼴 햇살 무늬 (헤더·카드 배경) */
+.sunburst {
+  background:
+    radial-gradient(circle at 50% 120%, color-mix(in oklab, var(--color-felt-950) 10%, transparent) 30%, transparent 31%),
+    repeating-conic-gradient(from 270deg at 50% 120%, color-mix(in oklab, var(--color-gold-400) 13%, transparent) 0deg 4deg, transparent 4deg 10deg);
+}
+
+/* ── 버튼 ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  min-height: 44px; padding: 0.55rem 1.1rem; border-radius: 3px; cursor: pointer;
+  font-weight: 700; letter-spacing: 0.04em; user-select: none;
+  transition: transform 120ms ease, filter 120ms ease, background-color 120ms ease, opacity 120ms ease;
+}
+.btn:active:not(:disabled) { transform: translateY(1px) scale(0.99); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-gold {
+  color: var(--color-ink);
+  background: linear-gradient(180deg, var(--color-gold-200), var(--color-gold-400) 55%, var(--color-gold-500));
+  box-shadow: inset 0 1px 0 #fff6, inset 0 -2px 0 #0003, 0 0 0 1px var(--color-gold-700), 0 8px 18px -10px var(--color-gold-400);
+}
+.btn-gold:hover:not(:disabled) { filter: brightness(1.06); }
+.btn-ghost { color: var(--color-gold-200); background: transparent; border: 1px solid var(--gold-line); }
+.btn-ghost:hover:not(:disabled) { background: var(--gold-faint); }
+.btn-dark { color: var(--color-ivory); background: var(--color-ink); border: 1px solid var(--gold-faint); }
+.btn-dark:hover:not(:disabled) { border-color: var(--gold-line); }
+.btn-danger { color: var(--color-ivory); background: color-mix(in oklab, var(--color-ruby) 85%, black); border: 1px solid var(--color-ruby); }
+.btn-sm { min-height: 36px; padding: 0.3rem 0.75rem; font-size: 0.85rem; }
+
+/* ── 입력 ── */
+.field {
+  width: 100%; min-height: 44px; padding: 0.55rem 0.8rem; border-radius: 3px;
+  background: color-mix(in oklab, var(--color-ink) 70%, transparent);
+  border: 1px solid var(--gold-faint);
+}
+.field:focus { outline: none; border-color: var(--color-gold-300); box-shadow: 0 0 0 3px var(--gold-faint); }
+.field-label { display: block; font-size: 0.8rem; color: var(--color-mist); margin-bottom: 0.3rem; }
+
+/* ── 칩·배지 ── */
+.chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid var(--gold-faint); background: color-mix(in oklab, var(--color-ink) 55%, transparent); font-size: 0.8rem; white-space: nowrap; }
+.chip-gold { border-color: var(--gold-line); color: var(--color-gold-200); }
+.chip-ruby { border-color: color-mix(in oklab, var(--color-ruby) 70%, transparent); color: #f2b3aa; }
+.chip-jade { border-color: color-mix(in oklab, var(--color-jade) 60%, transparent); color: #a9ecc9; }
+
+/* ── 코인 ── */
+.coin::before { content: "◈"; margin-right: 0.2em; color: var(--color-gold-400); font-size: 0.85em; }
+
+/* ── 표 ── */
+.table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.table th { text-align: left; font-weight: 500; color: var(--color-mist); font-size: 0.75rem; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--gold-faint); white-space: nowrap; }
+.table td { padding: 0.5rem; border-bottom: 1px solid color-mix(in oklab, var(--color-gold-400) 9%, transparent); vertical-align: top; }
+.table tr:hover td { background: color-mix(in oklab, var(--color-gold-400) 4%, transparent); }
+
+/* ── 트럼프 카드 ── */
+.playing-card {
+  width: 3.4rem; height: 4.8rem; border-radius: 6px; display: grid; place-items: center; position: relative;
+  background: linear-gradient(160deg, #fffaf0, #efe3c4); color: #1b1b1b; font-family: var(--font-deco); font-weight: 700;
+  box-shadow: 0 0 0 1px #0004, 0 6px 14px -6px #000c; animation: card-in 260ms ease-out both;
+}
+.playing-card.red { color: #b3261e; }
+.playing-card .rank { position: absolute; top: 0.2rem; left: 0.35rem; font-size: 0.9rem; line-height: 1; }
+.playing-card .suit { font-size: 1.6rem; }
+.playing-card.back {
+  background: repeating-linear-gradient(45deg, var(--color-felt-700) 0 6px, var(--color-felt-800) 6px 12px);
+  box-shadow: inset 0 0 0 3px var(--color-gold-400), inset 0 0 0 5px var(--color-felt-900), 0 6px 14px -6px #000c;
+}
+.playing-card.joker { background: linear-gradient(160deg, #1d1d1d, #3a2f12); color: var(--color-gold-300); }
+@media (min-width: 480px) { .playing-card { width: 4rem; height: 5.6rem; } .playing-card .suit { font-size: 1.9rem; } }
+
+/* ── 주사위 ── */
+.die {
+  width: 3rem; height: 3rem; border-radius: 10px; display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 0.4rem;
+  background: linear-gradient(150deg, #fffaf0, #e6dabb); box-shadow: inset 0 -3px 0 #0002, 0 6px 14px -6px #000c;
+  animation: die-in 380ms cubic-bezier(.2,.9,.3,1.3) both;
+}
+.die i { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #1b1b1b; place-self: center; }
+.die.red i { background: #b3261e; }
+.die.held { box-shadow: 0 0 0 3px var(--color-gold-400), 0 6px 14px -6px #000c; transform: translateY(-4px); }
+
+@keyframes card-in { from { opacity: 0; transform: translateY(-10px) rotateY(80deg); } to { opacity: 1; transform: none; } }
+@keyframes die-in { from { opacity: 0; transform: rotate(-120deg) scale(0.4); } to { opacity: 1; transform: none; } }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes envelope { 0% { transform: translateY(30px) rotate(-4deg); opacity: 0; } 60% { transform: translateY(-6px) rotate(1deg); opacity: 1; } 100% { transform: none; } }
+@keyframes pulse-gold { 0%, 100% { box-shadow: 0 0 0 0 var(--gold-faint); } 50% { box-shadow: 0 0 0 10px transparent; } }
+
+.rise { animation: rise 420ms ease-out both; }
+.shimmer-text {
+  background: linear-gradient(90deg, var(--color-gold-400), var(--color-gold-50), var(--color-gold-400)); background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 3.2s linear infinite;
+}
+.pulse-gold { animation: pulse-gold 2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}
+
+/* 화면 하단 내비게이션이 가리지 않게 */
+.with-nav { padding-bottom: calc(5.25rem + var(--safe-bottom)); }
