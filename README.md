@@ -27,7 +27,7 @@ corepack pnpm dev            # 웹앱 (에뮬레이터 연결: apps/fortuna/.env
 corepack pnpm test           # 순수 로직 테스트 (도박 환수율 시뮬레이션 포함)
 corepack pnpm test:rules     # 보안 규칙 테스트 (에뮬레이터 자동 기동, Java 필요)
 corepack pnpm check          # 타입 + 테스트 + 규칙 + 빌드
-corepack pnpm deploy         # 빌드 후 Hosting + Firestore 규칙/인덱스 배포
+corepack pnpm release      # 빌드 후 Hosting + Firestore 규칙/인덱스 배포
 ```
 
 ## 설계 요약

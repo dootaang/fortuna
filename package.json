@@ -15,8 +15,8 @@
     "test": "corepack pnpm -r --filter !@fortuna/rules-tests test",
     "test:rules": "node scripts/with-emulators.mjs corepack pnpm --filter @fortuna/rules-tests test",
     "check": "corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:rules && corepack pnpm build",
-    "deploy": "corepack pnpm build && firebase deploy --only hosting,firestore",
-    "test:e2e": "node scripts/with-emulators.mjs corepack pnpm exec playwright test"
+    "test:e2e": "node scripts/with-emulators.mjs corepack pnpm exec playwright test",
+    "release": "corepack pnpm build && firebase deploy --only hosting,firestore"
   },
   "devDependencies": {
     "@fortuna/core": "workspace:*",

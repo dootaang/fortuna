@@ -66,7 +66,7 @@
 - 게임 설명: `packages/core/src/content/games.ts`
 - 디스코드 문구: `packages/core/src/content/notify.ts`
 
-바꾼 뒤 `corepack pnpm deploy`로 배포합니다.
+바꾼 뒤 `corepack pnpm release`로 배포합니다.
 
 ## 무료 한도
 
