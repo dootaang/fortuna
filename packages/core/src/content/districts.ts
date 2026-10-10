@@ -72,12 +72,12 @@ export const DISTRICTS: readonly DistrictContent[] = [
     blurb: "객잔의 등불과 표국 깃발이 휘날리는, 강호의 규칙이 남은 구역.",
     work: {
       sort: {
-        title: "표국 배달 분류", intro: "오늘 실을 화물을 성문별 수레에 나눠 실으세요.", icon: "📦",
-        bins: [{ id: "east", label: "동문", icon: "🌅" }, { id: "west", label: "서문", icon: "🌇" }, { id: "south", label: "남문", icon: "⛰️" }],
+        title: "표국 화물 분류", intro: "오늘 실을 화물을 종류별 수레에 나눠 실으세요. 귀중품은 표사가 따로 지킵니다.", icon: "📦",
+        bins: [{ id: "valuable", label: "귀중품", icon: "💰" }, { id: "food", label: "식료품", icon: "🍚" }, { id: "letter", label: "서신·비급", icon: "✉️" }],
         items: [
-          { label: "동문 비단 상자", icon: "🧵", bin: "east" }, { label: "동문 찻잎 꾸러미", icon: "🍵", bin: "east" }, { label: "동문 서신", icon: "✉️", bin: "east" }, { label: "동문 약재", icon: "🌿", bin: "east" },
-          { label: "서문 은자 궤짝", icon: "💰", bin: "west" }, { label: "서문 검 한 자루", icon: "🗡️", bin: "west" }, { label: "서문 도자기", icon: "🏺", bin: "west" }, { label: "서문 비급 두루마리", icon: "📜", bin: "west" },
-          { label: "남문 쌀가마", icon: "🌾", bin: "south" }, { label: "남문 술독", icon: "🍶", bin: "south" }, { label: "남문 부채", icon: "🪭", bin: "south" }, { label: "남문 등롱", icon: "🏮", bin: "south" },
+          { label: "은자 궤짝", icon: "💰", bin: "valuable" }, { label: "청자 도자기", icon: "🏺", bin: "valuable" }, { label: "명검 한 자루", icon: "🗡️", bin: "valuable" }, { label: "비단 한 필", icon: "🧵", bin: "valuable" },
+          { label: "쌀가마", icon: "🌾", bin: "food" }, { label: "술독", icon: "🍶", bin: "food" }, { label: "찻잎 꾸러미", icon: "🍵", bin: "food" }, { label: "말린 생선", icon: "🐟", bin: "food" },
+          { label: "문파의 서신", icon: "✉️", bin: "letter" }, { label: "비급 두루마리", icon: "📜", bin: "letter" }, { label: "관아 공문", icon: "📃", bin: "letter" }, { label: "현상 수배서", icon: "📋", bin: "letter" },
         ],
       },
       memory: {
