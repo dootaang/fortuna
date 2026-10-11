@@ -16,13 +16,12 @@ export function VenueList({ venue }: { venue: Venue }) {
         <Link to="/alley" className={cx("btn", !house ? "btn-gold" : "btn-ghost")}>♣ {TEXT.lobby.alley}</Link>
         <Link to="/house" className={cx("btn", house ? "btn-gold" : "btn-ghost")}>{config.gambling.houseOpen ? "♛" : "🔒"} {TEXT.lobby.house}</Link>
       </div>
-      <PageTitle eyebrow={house ? "THE HOUSE" : "BACK ALLEY"} title={house ? TEXT.lobby.house : TEXT.lobby.alley} line={locked ? TEXT.lobby.houseLocked : house ? TEXT.lobby.houseLine : TEXT.lobby.alleyLine} />
+      <PageTitle eyebrow={house ? "THE HOUSE" : "BACK ALLEY"} title={house ? TEXT.lobby.house : TEXT.lobby.alley} />
 
       {locked ? (
         <Frame className="sunburst text-center">
           <div className="mx-auto grid h-36 w-28 place-items-center rounded-t-full border-2 border-gold-400 bg-ink/70 text-4xl shadow-[inset_0_0_30px_#000]" aria-hidden="true">🔒</div>
-          <p className="deco-title mt-4 text-xl">굳게 닫힌 금빛 문</p>
-          <p className="mt-2 text-sm text-mist">문 너머로 샹들리에 불빛과 칩 소리가 새어 나옵니다. 지배인이 문을 열 때까지 기다려야 합니다.</p>
+          <p className="deco-title mt-4 text-xl">{TEXT.lobby.houseLocked}</p>
         </Frame>
       ) : (
         <>
@@ -31,7 +30,7 @@ export function VenueList({ venue }: { venue: Venue }) {
               <span>1판 최대 <b className="num text-gold-200">{maxBet.toLocaleString("ko-KR")}</b></span>
               <span>이번 주 남은 판 <b className="num text-gold-200">{left}</b> / {config.gambling.weeklyLimit}</span>
             </p>
-            <p className="mt-1 text-xs text-mist">{house ? "하우스 엣지는 약 5%. 잃은 판돈은 지배인 금고로 들어갑니다." : "주민들끼리의 판이라 기대값은 거의 본전입니다."}</p>
+            <p className="mt-1 text-xs text-mist">{house ? "하우스 엣지 약 5% · 하우스 손익은 지배인 금고에 반영" : "기대값은 거의 본전"}</p>
           </Frame>
           {left === 0 && <div className="mb-4"><Notice>{TEXT.gamble.limitReached}</Notice></div>}
           <div className="grid gap-3 sm:grid-cols-2">

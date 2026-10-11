@@ -19,7 +19,7 @@ export default function ShopPage() {
 
   return (
     <div>
-      <PageTitle eyebrow="EMPORIUM" title={TEXT.lobby.shop} line={TEXT.lobby.shopLine} />
+      <PageTitle eyebrow="EMPORIUM" title={TEXT.lobby.shop} />
       <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1" role="tablist">
         {(["all", ...SHOP_CATEGORIES, "funds"] as const).map((key) => (
           <button key={key} type="button" role="tab" aria-selected={tab === key} className={cx("btn btn-sm shrink-0", tab === key ? "btn-gold" : "btn-dark")} onClick={() => setTab(key)}>

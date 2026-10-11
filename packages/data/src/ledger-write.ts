@@ -59,8 +59,8 @@ export function writeEntry(tx: Transaction, session: Session, pid: string, walle
 export function friendlyError(error: unknown): string {
   if (error instanceof FortunaError) return error.message;
   const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
-  if (code === "permission-denied") return "지배인이 이 요청을 정중히 거절했습니다. 화면을 새로고침한 뒤 다시 시도해 주십시오.";
-  if (code === "unavailable" || code === "deadline-exceeded") return "역과의 연결이 잠시 끊겼습니다. 잠시 후 다시 시도해 주십시오.";
+  if (code === "permission-denied") return "요청이 거부되었습니다. 새로고침한 뒤 다시 시도해 주세요.";
+  if (code === "unavailable" || code === "deadline-exceeded") return "연결이 끊겼습니다. 잠시 후 다시 시도해 주세요.";
   if (code === "aborted") return "다른 요청과 겹쳤습니다. 다시 시도해 주십시오.";
   return error instanceof Error ? error.message : String(error);
 }

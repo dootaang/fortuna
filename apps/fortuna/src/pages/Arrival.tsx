@@ -51,15 +51,14 @@ export function Arrival() {
           <h1 className="deco-title text-center text-2xl">{TEXT.arrival.envelope}</h1>
           <div className="my-3"><Ornament /></div>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between gap-3"><dt>{fill(TEXT.arrival.envelopeLine, { amount: welcome.loan })}</dt><dd><Coins value={welcome.loan} signed /></dd></div>
-            <div className="flex justify-between gap-3 text-[#f2b3aa]"><dt>{fill(TEXT.arrival.gateLine, { amount: welcome.gateFee })}</dt><dd><Coins value={-welcome.gateFee} /></dd></div>
+            <div className="flex justify-between gap-3"><dt>{TEXT.arrival.envelopeLine}</dt><dd><Coins value={welcome.loan} signed /></dd></div>
+            <div className="flex justify-between gap-3 text-[#f2b3aa]"><dt>{TEXT.arrival.gateLine}</dt><dd><Coins value={-welcome.gateFee} /></dd></div>
             <div className="flex justify-between gap-3 border-t border-gold-400/30 pt-2 font-bold"><dt>시작 잔액</dt><dd><Coins value={slip.delta} /></dd></div>
           </dl>
           <div className="mt-4 rounded-sm border border-ruby/50 bg-ink/50 p-3 text-sm">
             <p className="deco-caps !text-[#f2b3aa]">차용증</p>
             <p className="mt-1">{fill(TEXT.arrival.debtLine, { amount: welcome.debt })}</p>
           </div>
-          <p className="mt-4 text-center text-sm text-mist">{fill(TEXT.arrival.startLine, { amount: slip.delta })}</p>
           <button type="button" className="btn btn-gold mt-5 w-full" disabled={busy} onClick={() => void run(() => arrive(session)).then((id) => relay(notify.relayUrl, id))}>
             {busy ? "개찰구 통과 중…" : TEXT.arrival.enter}
           </button>

@@ -22,7 +22,7 @@ test("arrival, work, gamble, shop and wallet on a phone", async ({ page }) => {
   await page.getByRole("button", { name: "도시로 들어선다" }).click();
 
   // Lobby: 1,000 envelope − 100 gate fee, debt 1,500.
-  await expect(page.getByRole("heading", { name: /다시 뵙게 되어 기쁩니다/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "에이든", level: 1 })).toBeVisible();
   await expect(page.locator("header").getByText("900")).toBeVisible();
   await page.screenshot({ path: "test-results/shots/03-lobby.png", fullPage: true, animations: "disabled" });
 
@@ -71,7 +71,7 @@ test("arrival, work, gamble, shop and wallet on a phone", async ({ page }) => {
   await expect(page.getByText("무협 간부의 버릇")).toBeVisible();
   await page.screenshot({ path: "test-results/shots/08-shop.png", fullPage: true, animations: "disabled" });
   await page.locator("article", { hasText: "무협 간부의 버릇" }).getByRole("button", { name: /구매/ }).click();
-  await page.getByRole("button", { name: /구매하신 분께만/ }).click();
+  await page.getByRole("button", { name: /비밀 내용 보기/ }).click();
   await expect(page.getByText("검을 뽑기 전에 왼손으로 소매를 턴다.")).toBeVisible();
   await page.getByRole("button", { name: "닫기" }).click();
 
@@ -90,7 +90,7 @@ test("a second device joins with the same code", async ({ browser }) => {
   const context = await browser.newContext();
   const page = await context.newPage();
   await enterCity(page);
-  await expect(page.getByRole("heading", { name: /다시 뵙게 되어 기쁩니다/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "에이든", level: 1 })).toBeVisible();
   await context.close();
 });
 
@@ -100,6 +100,6 @@ test("a wrong code is politely refused", async ({ browser }) => {
   await page.goto("/");
   await page.getByPlaceholder("FRT-XXXX-XXXX-XXXX").fill("FRT-0000-0000-0000");
   await page.getByRole("button", { name: "개찰구 통과" }).click();
-  await expect(page.getByText(/등록되어 있지 않군요/)).toBeVisible();
+  await expect(page.getByText(/등록되지 않은 접속 코드/)).toBeVisible();
   await context.close();
 });

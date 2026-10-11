@@ -16,7 +16,7 @@ export default function WorkHub() {
   const deductionPct = district?.liberated ? 0 : (district?.deductionBps ?? 0) / 100;
   return (
     <div>
-      <PageTitle eyebrow={`${content.emblem} ${content.name}`} title={TEXT.lobby.work} line={TEXT.lobby.workLine} />
+      <PageTitle eyebrow={`${content.emblem} ${content.name}`} title={TEXT.lobby.work} />
       <Frame className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
           <span>이번 주 남은 일 <b className="num text-gold-200">{left}</b> / {config.work.weeklyLimit}</span>

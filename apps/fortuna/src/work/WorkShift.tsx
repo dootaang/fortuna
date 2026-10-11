@@ -63,7 +63,7 @@ export default function WorkShift() {
             <div className="flex justify-between border-t border-gold-400/40 pt-2 text-lg font-bold text-gold-200"><dt>{TEXT.work.received}</dt><dd><Coins value={result.net} /></dd></div>
           </dl>
           <div className="my-4"><Ornament /></div>
-          <p className="text-center text-sm text-mist">성과 {Math.round(phase.performance * 100)}% · {result.deduction === 0 ? TEXT.work.liberated : TEXT.work.deductionLine}</p>
+          <p className="text-center text-sm text-mist">성과 {Math.round(phase.performance * 100)}%{result.deduction === 0 ? ` · ${TEXT.work.liberated}` : ""}</p>
           <div className="mt-5 grid grid-cols-2 gap-2">
             <Link to="/work" className="btn btn-ghost">일터로</Link>
             <button type="button" className="btn btn-gold" disabled={left === 0} onClick={() => setPhase({ name: "intro" })}>{left === 0 ? "이번 주 끝" : "한 번 더"}</button>

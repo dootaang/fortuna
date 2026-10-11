@@ -105,7 +105,7 @@ function BlackjackView({ state, busy, act }: ViewProps<BlackjackState>) {
             <button type="button" className="btn btn-gold min-h-14" disabled={busy} onClick={() => void act("hit")}>한 장 더 (히트)</button>
             <button type="button" className="btn btn-dark min-h-14" disabled={busy} onClick={() => void act("stand")}>멈춤 (스탠드)</button>
           </ActionRow>
-          {hint && <p className="mt-2 text-center text-xs text-mist">딜러의 귓속말: 저라면 {hint}를 하겠습니다.</p>}
+          {hint && <p className="mt-2 text-center text-xs text-mist">추천: {hint}</p>}
         </>
       )}
     </div>

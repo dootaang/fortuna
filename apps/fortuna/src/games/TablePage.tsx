@@ -135,7 +135,6 @@ function BetPanel({ game, venue, enabled }: { game: GameId; venue: Venue; enable
 
 function ResultPanel({ finished, venue, onAgain, backTo }: { finished: Finished; venue: Venue; onAgain: () => void; backTo: string }) {
   const net = finished.payout - finished.bet;
-  const line = net > 0 ? TEXT.gamble.win : net < 0 ? TEXT.gamble.lose : TEXT.gamble.push;
   return (
     <Frame className="rise text-center">
       <p className="deco-caps">{venue === "house" ? "THE HOUSE" : "BACK ALLEY"}</p>
@@ -147,7 +146,6 @@ function ResultPanel({ finished, venue, onAgain, backTo }: { finished: Finished;
         <div className="flex justify-between"><dt>지급</dt><dd><Coins value={finished.payout} /></dd></div>
         <div className="flex justify-between border-t border-gold-400/30 pt-1 font-bold"><dt>손익</dt><dd><Coins value={net} signed /></dd></div>
       </dl>
-      <p className="mt-3 text-sm text-mist">{line}</p>
       <div className="mt-5 grid grid-cols-2 gap-2">
         <Link to={backTo} className="btn btn-ghost">나가기</Link>
         <button type="button" className="btn btn-gold" onClick={onAgain}>한 판 더</button>

@@ -10,7 +10,7 @@ async function arriveWithFreshPlayer(page: Page) {
   await page.getByRole("button", { name: "봉투를 받는다" }).click();
   await page.getByRole("button", { name: "환영 봉투 열기" }).click();
   await page.getByRole("button", { name: "도시로 들어선다" }).click();
-  await expect(page.getByRole("heading", { name: /다시 뵙게 되어 기쁩니다/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "에이든", level: 1 })).toBeVisible();
 }
 
 async function open(page: Page, venue: string, game: string) {

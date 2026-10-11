@@ -19,7 +19,7 @@ export async function syncClock(db: Firestore, uid: string, clock: Clock): Promi
 export async function bindAccessCode(session: Session, code: string): Promise<string> {
   const hash = accessCodeHash(code);
   const access = await getDoc(refs.accessCode(session.db, hash));
-  if (!access.exists()) throw new FortunaError("invalid-code", "그런 승차권은 이 역에 등록되어 있지 않군요. 번호를 다시 확인해 주시겠습니까?");
+  if (!access.exists()) throw new FortunaError("invalid-code", "등록되지 않은 접속 코드입니다. 다시 확인해 주세요.");
   const { playerId, version } = access.data();
   await setDoc(refs.binding(session.db, session.uid), { playerId, codeHash: hash, version, boundAt: serverTimestamp() as unknown as Timestamp });
   return playerId;
@@ -27,24 +27,24 @@ export async function bindAccessCode(session: Session, code: string): Promise<st
 
 export async function readWallet(tx: Transaction, session: PlayerSession): Promise<Wallet<Timestamp>> {
   const snapshot = await tx.get(refs.wallet(session.db, session.pid));
-  if (!snapshot.exists()) throw new FortunaError("no-wallet", "지갑이 아직 준비되지 않았습니다. 딜러에게 문의하십시오.");
+  if (!snapshot.exists()) throw new FortunaError("no-wallet", "지갑이 아직 준비되지 않았습니다. 딜러에게 문의하세요.");
   return snapshot.data();
 }
 
 export async function readEconomy(tx: Transaction, db: Firestore) {
   const snapshot = await tx.get(refs.config(db));
-  if (!snapshot.exists()) throw new FortunaError("no-config", "도시가 아직 문을 열지 않았습니다. 딜러가 초기 설정을 마쳐야 합니다.");
+  if (!snapshot.exists()) throw new FortunaError("no-config", "딜러가 아직 초기 설정을 하지 않았습니다.");
   return normalizeEconomy(snapshot.data());
 }
 
 function requireArrived(wallet: Wallet<Timestamp>) {
-  if (!wallet.arrived) throw new FortunaError("not-arrived", "먼저 개찰구를 통과하셔야 합니다.");
+  if (!wallet.arrived) throw new FortunaError("not-arrived", "먼저 도착 절차를 마쳐야 합니다.");
 }
 
 export async function arrive(session: PlayerSession): Promise<string> {
   return runTransaction(session.db, async (tx) => {
     const wallet = await readWallet(tx, session), config = await readEconomy(tx, session.db);
-    if (wallet.arrived) throw new FortunaError("already-arrived", "이미 도착하셨습니다.");
+    if (wallet.arrived) throw new FortunaError("already-arrived", "이미 도착 처리되었습니다.");
     const slip = arrivalSlip(config.welcome);
     return writeEntry(tx, session, session.pid, wallet, {
       type: "arrival", actor: "player", ...slip,
@@ -63,9 +63,9 @@ export async function submitWork(session: PlayerSession, template: WorkTemplate,
     const player = (await tx.get(refs.player(session.db, session.pid))).data();
     if (!player) throw new FortunaError("no-player", "등록되지 않은 승객입니다.");
     const district = (await tx.get(refs.district(session.db, player.districtId))).data();
-    if (!district) throw new FortunaError("no-district", "소속 구역 정보가 없습니다. 딜러에게 문의하십시오.");
+    if (!district) throw new FortunaError("no-district", "소속 구역 정보가 없습니다. 딜러에게 문의하세요.");
     const week = session.clock.week(), counters = bumpCounters(wallet, "work", week);
-    if (counters.workUsed > config.work.weeklyLimit) throw new FortunaError("work-limit", "이번 주 일거리는 모두 끝났습니다.");
+    if (counters.workUsed > config.work.weeklyLimit) throw new FortunaError("work-limit", "이번 주 일을 모두 했습니다.");
     const rounded = Math.round(performance * 1000) / 1000;
     const slip = wageSlip(wageFor(rounded, config.work), district);
     const ledgerId = writeEntry(tx, session, session.pid, wallet, {
@@ -81,14 +81,14 @@ export async function openBet(session: PlayerSession, game: GameId, venue: Venue
   return runTransaction(session.db, async (tx) => {
     const wallet = await readWallet(tx, session), config = await readEconomy(tx, session.db);
     requireArrived(wallet);
-    if (wallet.openWager) throw new FortunaError("wager-open", "진행 중인 판이 있습니다. 하던 판부터 마저 하시지요.");
-    if (venue === "house" && !config.gambling.houseOpen) throw new FortunaError("house-closed", "하우스는 아직 문을 열지 않았습니다.");
+    if (wallet.openWager) throw new FortunaError("wager-open", "진행 중인 판이 있습니다.");
+    if (venue === "house" && !config.gambling.houseOpen) throw new FortunaError("house-closed", "하우스가 아직 열리지 않았습니다.");
     const table = config.gambling.games[game][venue];
     if (!table.enabled) throw new FortunaError("table-closed", "이 테이블은 지금 닫혀 있습니다.");
     const maxBet = venue === "house" ? config.gambling.houseMaxBet : config.gambling.alleyMaxBet;
-    if (!Number.isInteger(bet) || bet < config.gambling.minBet || bet > maxBet) throw new FortunaError("bet-range", `판돈은 ${config.gambling.minBet}~${maxBet}코인 사이로 정해 주십시오.`);
+    if (!Number.isInteger(bet) || bet < config.gambling.minBet || bet > maxBet) throw new FortunaError("bet-range", `판돈은 ${config.gambling.minBet}~${maxBet}코인 사이여야 합니다.`);
     const counters = bumpCounters(wallet, "gamble", session.clock.week());
-    if (counters.gambleUsed > config.gambling.weeklyLimit) throw new FortunaError("gamble-limit", "이번 주에는 충분히 즐기셨군요.");
+    if (counters.gambleUsed > config.gambling.weeklyLimit) throw new FortunaError("gamble-limit", "이번 주 도박 횟수를 모두 썼습니다.");
     const wagerId = `${session.pid}_${wallet.seq + 1}`;
     return writeEntry(tx, session, session.pid, wallet, {
       type: "betOpen", actor: "player", delta: -bet, vaultDelta: venue === "house" ? bet : 0,
@@ -163,7 +163,7 @@ export async function repayDebt(session: PlayerSession, amount: number): Promise
   return runTransaction(session.db, async (tx) => {
     const wallet = await readWallet(tx, session);
     requireArrived(wallet);
-    if (!Number.isInteger(amount) || amount <= 0) throw new FortunaError("amount", "상환 금액을 확인해 주십시오.");
+    if (!Number.isInteger(amount) || amount <= 0) throw new FortunaError("amount", "상환 금액을 확인해 주세요.");
     if (amount > wallet.debt) throw new FortunaError("debt-negative", "빚보다 많이 갚을 수는 없습니다.");
     return writeEntry(tx, session, session.pid, wallet, {
       type: "repay", actor: "player", delta: -amount, debtDelta: -amount, vaultDelta: amount, detail: { amount },

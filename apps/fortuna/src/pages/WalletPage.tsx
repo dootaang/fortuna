@@ -48,7 +48,6 @@ function SkillPayment() {
   return (
     <Frame>
       <h2 className="deco-title text-lg">{TEXT.skill.title}</h2>
-      <p className="text-sm text-mist">{TEXT.skill.intro}</p>
       <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="특기">
         {skills.map(([id, entry]) => (
           <button key={id} type="button" role="radio" aria-checked={id === skillId} className={cx("btn btn-sm", id === skillId ? "btn-gold" : "btn-dark")} onClick={() => { setSkillId(id); setBoost(0); }}>
@@ -100,7 +99,7 @@ function Repay() {
   return (
     <Frame>
       <h2 className="deco-title text-lg">{TEXT.repay.title}</h2>
-      <p className="text-sm text-mist">{TEXT.repay.intro} 남은 빚 <Coins value={wallet.debt} /></p>
+      <p className="text-sm text-mist">남은 빚 <Coins value={wallet.debt} /></p>
       <div className="mt-3 flex items-end gap-2">
         <div className="flex-1"><NumberField label="상환 금액" value={amount} onChange={setAmount} min={1} max={max} /></div>
         <button type="button" className="btn btn-ghost" onClick={() => setAmount(max)}>전액</button>
