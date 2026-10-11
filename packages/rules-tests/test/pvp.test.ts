@@ -52,7 +52,7 @@ async function seatAll(id: string, seated: PlayerSession[]) {
 /** Open a 3-seat alley room, fill it, start and deal. */
 async function playingRoom(venue: "alley" | "house" = "alley", stake = 100): Promise<string> {
   const [a, b, c] = players as [PlayerSession, PlayerSession, PlayerSession];
-  const id = await createPvpRoom(a, { venue, stake, maxSeats: 3 });
+  const id = (await createPvpRoom(a, { venue, stake, maxSeats: 3 })).roomId;
   await joinPvpRoom(b, id);
   await joinPvpRoom(c, id);
   await startPvpRoom(a, id);
@@ -66,7 +66,7 @@ function sessionOf(pid: string): PlayerSession { return players.find((player) =>
 describe("pvp rooms", () => {
   it("stakes on create and join, refunds on leave, caps the seats", async () => {
     const [a, b, c, d] = players as [PlayerSession, PlayerSession, PlayerSession, PlayerSession];
-    const id = await createPvpRoom(a, { venue: "alley", stake: 100, maxSeats: 3 });
+    const id = (await createPvpRoom(a, { venue: "alley", stake: 100, maxSeats: 3 })).roomId;
     expect(await rootData(`wallets/${a.pid}`)).toMatchObject({ balance: 800, room: id });
     await joinPvpRoom(b, id);
     await joinPvpRoom(c, id);
@@ -81,7 +81,7 @@ describe("pvp rooms", () => {
 
   it("only the host starts; the deal must be the table entry for the sealed time", async () => {
     const [a, b] = players as [PlayerSession, PlayerSession];
-    const id = await createPvpRoom(a, { venue: "alley", stake: 50, maxSeats: 2 });
+    const id = (await createPvpRoom(a, { venue: "alley", stake: 50, maxSeats: 2 })).roomId;
     await joinPvpRoom(b, id);
     // A guest forging the start write is refused by the rules (the client refuses earlier).
     await denied(updateDoc(pvpRefs.room(b.db, id), { status: "dealing", op: "start", order: [b.pid, a.pid], pos: { [b.pid]: 0, [a.pid]: 1 }, startedAt: serverTimestamp() }));
@@ -179,7 +179,7 @@ describe("pvp rooms", () => {
 
   it("refunds everyone when the host cancels or the dealer voids", async () => {
     const [a, b] = players as [PlayerSession, PlayerSession];
-    const waiting = await createPvpRoom(a, { venue: "alley", stake: 70, maxSeats: 2 });
+    const waiting = (await createPvpRoom(a, { venue: "alley", stake: 70, maxSeats: 2 })).roomId;
     await joinPvpRoom(b, waiting);
     await denied(closePvpRoom(b, waiting, "cancel"));
     await closePvpRoom(a, waiting, "cancel");

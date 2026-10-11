@@ -81,9 +81,10 @@ async function readRoom(tx: Parameters<Parameters<typeof runTransaction>[1]>[0],
 
 export interface NewRoom { venue: Venue; stake: number; maxSeats: number; }
 
-export async function createPvpRoom(session: PlayerSession, input: NewRoom): Promise<string> {
+/** Returns the room id and the stake ledger id (also the "room opened" event id to relay). */
+export async function createPvpRoom(session: PlayerSession, input: NewRoom): Promise<{ roomId: string; ledgerId: string }> {
   const roomRef = doc(pvpRefs.rooms(session.db));
-  await runTransaction(session.db, async (tx) => {
+  const ledgerId = await runTransaction(session.db, async (tx) => {
     const wallet = await readWallet(tx, session);
     const config = normalizeEconomy((await tx.get(refs.config(session.db))).data());
     const player = (await tx.get(refs.player(session.db, session.pid))).data();
@@ -97,6 +98,7 @@ export async function createPvpRoom(session: PlayerSession, input: NewRoom): Pro
     if (![2, 3, 4].includes(input.maxSeats)) throw new FortunaError("seats", "인원은 2~4명입니다.");
     const ledgerId = writeEntry(tx, session, session.pid, wallet, {
       type: "pvpStake", actor: "player", delta: -input.stake, detail: { roomId: roomRef.id, stake: input.stake, venue: input.venue }, wallet: { room: roomRef.id },
+      event: { kind: "pvpOpen" },
     });
     tx.set(roomRef, {
       game: "old-maid", venue: input.venue, stake: input.stake, maxSeats: input.maxSeats,
@@ -104,8 +106,9 @@ export async function createPvpRoom(session: PlayerSession, input: NewRoom): Pro
       status: "waiting", hostPid: session.pid, createdAt: ts(),
       seats: { [session.pid]: { name: player.name, joinedAt: ts() } }, seatCount: 1, pot: input.stake, op: "create", lastLedger: ledgerId,
     });
+    return ledgerId;
   });
-  return roomRef.id;
+  return { roomId: roomRef.id, ledgerId };
 }
 
 export async function joinPvpRoom(session: PlayerSession, roomId: string): Promise<void> {
@@ -257,7 +260,7 @@ export async function autoResolvePick(session: Session, roomId: string): Promise
 
 // ── 정산과 정리 ──
 
-export async function claimPvp(session: PlayerSession, roomId: string): Promise<{ amount: number; kind: string }> {
+export async function claimPvp(session: PlayerSession, roomId: string): Promise<{ amount: number; kind: string; ledgerId: string }> {
   return runTransaction(session.db, async (tx) => {
     const wallet = await readWallet(tx, session), room = await readRoom(tx, session.db, roomId);
     if (room.status !== "finished" && room.status !== "void") throw new FortunaError("not-over", "아직 끝나지 않은 판입니다.");
@@ -268,9 +271,10 @@ export async function claimPvp(session: PlayerSession, roomId: string): Promise<
     const houseCut = room.status === "finished" && room.winners?.[0] === session.pid ? (room.rake ?? 0) + (room.remainder ?? 0) : 0;
     const ledgerId = writeEntry(tx, session, session.pid, wallet, {
       type: "pvpPayout", actor: "player", delta: amount, vaultDelta: houseCut, detail: { roomId, kind }, wallet: { room: null },
+      ...(kind === "win" ? { event: { kind: "pvpWin" as const } } : {}),
     });
     tx.update(pvpRefs.room(session.db, roomId), { [`claimed.${session.pid}`]: true, op: "claim", lastLedger: ledgerId });
-    return { amount, kind };
+    return { amount, kind, ledgerId };
   });
 }
 

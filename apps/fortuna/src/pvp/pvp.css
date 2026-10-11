@@ -1,0 +1,93 @@
+/* PvP 도둑잡기. 비행·뒤집기·버림 더미·배분 레이어는 lucky-arcade old-maid.css에서 이식(GPL-3.0-or-later). */
+
+.om-table { position: relative; display: grid; gap: .75rem; }
+.om-seats-top { display: grid; gap: .5rem; grid-template-columns: repeat(var(--om-top, 1), minmax(0, 1fr)); }
+
+.om-seat {
+  position: relative; padding: .5rem .6rem; border-radius: 4px; text-align: center;
+  border: 1px solid var(--gold-faint); background: color-mix(in oklab, var(--color-ink) 60%, transparent);
+  transition: border-color .2s, box-shadow .2s, transform .2s, opacity .2s;
+}
+.om-seat[data-active="actor"] { border-color: var(--color-gold-300); box-shadow: 0 0 0 1px var(--color-gold-300), 0 0 24px -6px var(--color-gold-400); transform: translateY(2px); }
+.om-seat[data-active="target"] { border-color: color-mix(in oklab, var(--color-gold-400) 70%, transparent); }
+.om-seat[data-offline="true"] { opacity: .55; }
+.om-seat-name { font-weight: 700; font-size: .85rem; }
+.om-seat-meta { font-size: .7rem; color: var(--color-mist); }
+.om-mini-fan { display: flex; justify-content: center; margin-top: .35rem; min-height: 2.1rem; }
+.om-mini-fan > span { width: 1.25rem; height: 1.85rem; margin-left: -.7rem; border-radius: 3px; box-shadow: inset 0 0 0 1.5px var(--color-gold-400), inset 0 0 0 3px var(--color-felt-900); background: repeating-linear-gradient(45deg, var(--color-felt-700) 0 3px, var(--color-felt-800) 3px 6px); }
+.om-mini-fan > span:first-child { margin-left: 0; }
+.om-emote { position: absolute; left: 50%; top: -1.1rem; z-index: 5; font-size: 1.5rem; transform: translateX(-50%); animation: om-pop 2.4s ease-out both; pointer-events: none; }
+@keyframes om-pop { 0% { opacity: 0; transform: translate(-50%, 8px) scale(.6); } 12% { opacity: 1; transform: translate(-50%, -4px) scale(1.15); } 80% { opacity: 1; transform: translate(-50%, -8px) scale(1); } 100% { opacity: 0; transform: translate(-50%, -18px) scale(.9); } }
+
+/* 가운데 펠트 */
+.om-center {
+  position: relative; min-height: 15rem; overflow: hidden; border-radius: 50% / 18%;
+  border: 1px solid var(--gold-line);
+  background: radial-gradient(ellipse at 50% 40%, var(--color-felt-600), var(--color-felt-800) 70%, var(--color-felt-950));
+  box-shadow: inset 0 0 0 5px color-mix(in oklab, var(--color-felt-950) 70%, transparent), inset 0 0 0 6px var(--gold-faint), inset 0 10px 40px #0008;
+}
+.om-center-copy { position: absolute; left: 0; right: 0; top: .7rem; z-index: 7; text-align: center; font-size: .78rem; color: var(--color-gold-200); text-shadow: 0 1px 4px #000; }
+
+/* 제시된 손패 (뽑힐 사람의 부채) */
+.om-offer { position: absolute; inset: 0; z-index: 6; display: grid; place-content: center; padding: 2.4rem 1rem 1rem; }
+.om-offer-hand { display: flex; justify-content: center; align-items: center; padding: 1rem 1.6rem .3rem; }
+.om-offer-card { position: relative; flex: 0 0 auto; margin-left: -1.6rem; padding: 0; border: 0; background: transparent; border-radius: 8px; transition: transform .16s ease-out; }
+.om-offer-card:first-child { margin-left: 0; }
+.om-offer-card:not(:disabled) { cursor: pointer; }
+.om-offer-card[data-raised="true"] { transform: translateY(-14px); }
+.om-offer-card:not(:disabled):hover, .om-offer-card:not(:disabled):focus-visible, .om-offer-card.inspected { z-index: 5; transform: translateY(-12px); }
+.om-offer-card.inspected .playing-card { box-shadow: 0 0 0 2px var(--color-gold-200), 0 0 18px var(--color-gold-400); }
+.om-offer-card[data-eyed="true"]::after { content: "👁"; position: absolute; left: 50%; top: -1.3rem; transform: translateX(-50%); font-size: .9rem; }
+
+/* 버림 더미: 버린 사람 쪽으로 치우치고, 결정론적으로 흔들린다 */
+.om-pile { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.om-pile-slot {
+  --base-x: 0px; --base-y: 0px; --angle: 0deg;
+  position: absolute; left: 50%; top: 55%;
+  transform: translate(calc(-50% + var(--base-x) + var(--jitter-x)), calc(-50% + var(--base-y) + var(--jitter-y))) rotate(calc(var(--angle) + var(--jitter-r)));
+}
+.om-pile-slot[data-dir="top"] { --base-y: -58px; --angle: 180deg; }
+.om-pile-slot[data-dir="left"] { --base-x: -60px; --base-y: -30px; --angle: 90deg; }
+.om-pile-slot[data-dir="right"] { --base-x: 60px; --base-y: -30px; --angle: -90deg; }
+.om-pile-slot[data-dir="me"] { --base-y: 46px; }
+.om-pile-slot[data-arriving="true"] { z-index: 2; }
+.om-pile-pair { display: flex; filter: drop-shadow(0 5px 7px #0007); }
+.om-pile-pair .playing-card { width: 2.3rem; height: 3.3rem; margin: 0 -.45rem; animation: none; }
+.om-pile-pair .playing-card .suit { font-size: 1rem; }
+.om-pile-pair .playing-card .rank { font-size: .6rem; }
+.om-pile-pair .playing-card:first-child { transform: rotate(-5deg); }
+.om-pile-pair .playing-card:last-child { transform: rotate(5deg); }
+
+/* 배분 */
+.om-deal-layer { position: absolute; inset: 0; z-index: 20; pointer-events: none; }
+.om-deck, .om-deal-card { position: absolute; left: 50%; top: 50%; width: 2.9rem; height: 4.1rem; border-radius: 6px; background: repeating-linear-gradient(45deg, var(--color-felt-700) 0 5px, var(--color-felt-800) 5px 10px); box-shadow: inset 0 0 0 2px var(--color-gold-400), inset 0 0 0 4px var(--color-felt-900), 0 6px 14px #0008; }
+.om-deck { transform: translate(-50%, -50%); box-shadow: inset 0 0 0 2px var(--color-gold-400), inset 0 0 0 4px var(--color-felt-900), 3px 3px 0 #031510, 6px 6px 0 #020d09, 0 12px 24px #000a; }
+.om-deal-card { opacity: 0; }
+
+/* 날아가는 카드: 출발점 → (가운데에서 뒤집기) → 받는 사람 */
+.om-flight-layer { position: fixed; inset: 0; z-index: 90; pointer-events: none; overflow: visible; }
+.om-flight-card { position: absolute; left: 0; top: 0; width: 4.6rem; height: 6.4rem; transform-origin: center; perspective: 900px; }
+.om-flight-inner { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform .34s cubic-bezier(.2,.75,.2,1); }
+.om-flight-inner[data-phase="flipping"], .om-flight-inner[data-phase="face"], .om-flight-inner[data-phase="collecting"] { transform: rotateY(180deg); }
+.om-flight-side { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.om-flight-front { transform: rotateY(180deg); }
+.om-flight-side > .playing-card { width: 100%; height: 100%; animation: none; }
+.om-flight-side > .playing-card .suit { font-size: 2.4rem; }
+
+/* 내 손패 */
+.om-hand { display: flex; justify-content: center; flex-wrap: nowrap; padding: 1rem .5rem .4rem; overflow-x: auto; }
+.om-hand-card { position: relative; flex: 0 0 auto; margin-left: -1.4rem; padding: 0; border: 0; background: transparent; border-radius: 8px; transition: transform .16s ease-out; touch-action: manipulation; }
+.om-hand-card:first-child { margin-left: 0; }
+.om-hand-card .playing-card { animation: none; }
+.om-hand-card[data-raised="true"] { transform: translateY(-16px); }
+.om-hand-card[data-selected="true"] .playing-card { box-shadow: 0 0 0 3px var(--color-gold-300), 0 8px 16px #000a; }
+.om-hand-card[data-eyed="true"]::after { content: "👁"; position: absolute; left: 50%; top: -1.2rem; transform: translateX(-50%); font-size: .95rem; animation: om-blink 1s ease-in-out infinite; }
+@keyframes om-blink { 50% { opacity: .35; } }
+.om-hand-card[data-joker="true"] .playing-card { box-shadow: 0 0 0 2px var(--color-ruby), 0 0 16px #c4473a88; }
+
+.om-deadline { height: 3px; border-radius: 2px; background: var(--color-ink); overflow: hidden; }
+.om-deadline > i { display: block; height: 100%; background: linear-gradient(90deg, var(--color-gold-500), var(--color-gold-200)); transform-origin: left; }
+
+@media (prefers-reduced-motion: reduce) {
+  .om-flight-inner, .om-offer-card, .om-hand-card, .om-seat { transition: none; }
+}

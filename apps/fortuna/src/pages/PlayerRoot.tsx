@@ -8,6 +8,7 @@ import { PlayerProvider, usePlayer, usePlayerBinding } from "../session/player.t
 import { Frame, Splash, cx } from "../ui/kit.tsx";
 import { Counter } from "../fx/Counter.tsx";
 import { FxSettingsButton } from "../fx/FxSettings.tsx";
+import { useAutoClaim } from "../pvp/PvpLobby.tsx";
 import { Gate, type GateState } from "./Gate.tsx";
 import { Arrival } from "./Arrival.tsx";
 
@@ -55,6 +56,7 @@ const NAV = [
 
 function PlayerShell() {
   const { wallet, player } = usePlayer();
+  useAutoClaim();
   return (
     <div className="with-nav min-h-dvh">
       <header className="sticky top-0 z-30 border-b border-gold-400/25 bg-felt-950/85 backdrop-blur">

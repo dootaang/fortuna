@@ -18,6 +18,8 @@ export const NOTIFY_TEXT = {
   repaid: "📜 **{name}** 님이 지배인에게 진 빚을 모두 갚았습니다. 지배인은 정중히 고개를 숙였습니다.",
   liberation: "🔓 **{district}** 구역이 해방되었습니다! 이제 이 구역 주민의 임금에서 지배인 몫이 떼이지 않습니다.",
   houseOpen: "♛ 하우스의 금빛 문이 열렸습니다. 지배인이 정중히 손님들을 기다립니다. 행운이 함께하기를.",
+  pvpOpen: "🃏 **{name}** 님이 {venue}에 도둑잡기 판을 열었습니다. 판돈 {stake}코인 · 1등이 전부 가져갑니다.",
+  pvpWin: "👑 **{name}** 님이 도둑잡기 판에서 {amount}코인을 쓸어 담았습니다."
 } as const;
 
 export interface NotifyInput {
@@ -28,6 +30,8 @@ export interface NotifyInput {
   detail: Record<string, unknown>;
   /** Admin event payload. */
   payload: Record<string, unknown>;
+  /** Coins moved by the ledger entry, when the line needs it. */
+  delta?: number;
 }
 
 const n = (value: unknown) => (typeof value === "number" ? value : Number(value) || 0);
@@ -54,6 +58,8 @@ export function formatNotification(input: NotifyInput, bigGamble: number): strin
     case "repaid": return fill(NOTIFY_TEXT.repaid, { name });
     case "liberation": return fill(NOTIFY_TEXT.liberation, { district: districtContent(s(payload.districtId)).name });
     case "houseOpen": return NOTIFY_TEXT.houseOpen;
+    case "pvpOpen": return fill(NOTIFY_TEXT.pvpOpen, { name, venue: s(detail.venue) === "house" ? "하우스" : "뒷골목", stake: n(detail.stake) });
+    case "pvpWin": return fill(NOTIFY_TEXT.pvpWin, { name, amount: n(input.delta) });
     default: return null;
   }
 }

@@ -68,7 +68,7 @@ export interface InventoryDoc {
   lastLedger: string;
 }
 
-export const EVENT_KINDS = ["arrival", "bigGamble", "skill", "shop", "fundFilled", "liberation", "repaid", "houseOpen"] as const;
+export const EVENT_KINDS = ["arrival", "bigGamble", "skill", "shop", "fundFilled", "liberation", "repaid", "houseOpen", "pvpOpen", "pvpWin"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 export interface EventDoc {
   kind: EventKind;

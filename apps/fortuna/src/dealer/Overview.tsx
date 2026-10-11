@@ -1,8 +1,8 @@
 import { query, where } from "firebase/firestore";
 import { GAME_CONTENT, districtContent, periodWords, usedInPeriod } from "@fortuna/core";
-import { refs } from "@fortuna/data";
+import { closePvpRoom, pvpRefs, refs } from "@fortuna/data";
 import { useLiveQuery } from "../session/live.ts";
-import { Coins, Frame, Notice, Stat } from "../ui/kit.tsx";
+import { Coins, Frame, Notice, Stat, cx, useAction } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
 
 export function Overview() {
@@ -37,6 +37,8 @@ export function Overview() {
         <Notice>진행 중인 판: {openWagers.map((row) => `${row.data.name}(${GAME_CONTENT[wallets.get(row.id)!.openWager!.game].title})`).join(", ")}</Notice>
       )}
 
+      <PvpRooms />
+
       <section>
         <SectionTitle title="플레이어 한눈에 보기" />
         <div className="deco-frame overflow-x-auto p-2">
@@ -63,5 +65,30 @@ export function Overview() {
         </div>
       </section>
     </div>
+  );
+}
+
+/** Live PvP tables; the dealer can void one (everyone gets their stake back). */
+function PvpRooms() {
+  const { session } = useDealer();
+  const { busy, run } = useAction();
+  const rooms = useLiveQuery(query(pvpRefs.rooms(session.db), where("status", "in", ["waiting", "dealing", "playing"])), "dealer:pvp");
+  const rows = rooms.status === "ready" ? rooms.data : [];
+  if (!rows.length) return null;
+  return (
+    <section>
+      <SectionTitle title="진행 중인 대결" />
+      <div className="grid gap-2 md:grid-cols-2">
+        {rows.map(({ id, data }) => (
+          <Frame key={id} className="flex items-center justify-between gap-3 !p-3">
+            <div className="min-w-0 text-sm">
+              <p className="font-bold">{data.venue === "house" ? "하우스" : "뒷골목"} · 판돈 <Coins value={data.stake} /> · <span className={cx(data.status === "playing" ? "text-gold-200" : "text-mist")}>{data.status === "waiting" ? "대기" : data.status === "dealing" ? "배분 중" : `진행 ${data.moves ?? 0}수`}</span></p>
+              <p className="truncate text-xs text-mist">{Object.values(data.seats).map((seat) => seat.name).join(", ")}</p>
+            </div>
+            <button type="button" className="btn btn-danger btn-sm shrink-0" disabled={busy} onClick={() => { if (window.confirm("이 판을 무효로 할까요? 모두 판돈을 돌려받습니다.")) void run(() => closePvpRoom(session, id, "void"), "무효 처리했습니다."); }}>무효</button>
+          </Frame>
+        ))}
+      </div>
+    </section>
   );
 }

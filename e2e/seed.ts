@@ -87,3 +87,12 @@ export async function playSomeGames(code: string, rounds = 4): Promise<void> {
     await deleteApp(app).catch(() => undefined);
   }
 }
+
+/** Extra passengers for multiplayer tests. */
+export async function seedPlayers(names: string[]): Promise<string[]> {
+  return withDealer("dealer@example.com", async (session) => {
+    const codes: string[] = [];
+    for (const name of names) codes.push((await createPlayer(session, { name, districtId: "downtown", skills: [], note: "" })).code);
+    return codes;
+  });
+}

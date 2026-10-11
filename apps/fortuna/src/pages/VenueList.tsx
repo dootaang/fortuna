@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { GAME_CONTENT, GAME_IDS, TEXT, limitReachedText, periodWords, usesLeft, type Venue } from "@fortuna/core";
 import { usePlayer } from "../session/player.tsx";
+import { PvpLobby } from "../pvp/PvpLobby.tsx";
 import { Frame, Notice, PageTitle, cx } from "../ui/kit.tsx";
 
 export function VenueList({ venue }: { venue: Venue }) {
@@ -51,6 +52,7 @@ export function VenueList({ venue }: { venue: Venue }) {
               );
             })}
           </div>
+          <PvpLobby venue={venue} />
         </>
       )}
     </div>

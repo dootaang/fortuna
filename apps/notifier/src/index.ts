@@ -11,7 +11,7 @@ export interface Env {
 
 /** Event kinds and the notify toggle that governs each. */
 const TOGGLE: Record<string, NotifyEvent> = {
-  arrival: "arrival", bigGamble: "bigGamble", skill: "skill", shop: "shop", fundFilled: "fundFilled", repaid: "repaid", liberation: "liberation", houseOpen: "houseOpen",
+  arrival: "arrival", bigGamble: "bigGamble", skill: "skill", shop: "shop", fundFilled: "fundFilled", repaid: "repaid", liberation: "liberation", houseOpen: "houseOpen", pvpOpen: "pvp", pvpWin: "pvp",
 };
 
 function cors(origin: string | null, env: Env): Record<string, string> {
@@ -42,16 +42,20 @@ export async function relay(eventId: string, idToken: string, env: Env, post: ty
   const toggle = TOGGLE[kind];
   if (!toggle || !notify.enabled[toggle]) { await firestore.markSent(event.name, event.updateTime); return { status: "disabled" }; }
 
-  let detail: Record<string, unknown> = {}, playerName = "", districtId = "";
+  let detail: Record<string, unknown> = {}, playerName = "", districtId = "", delta = 0;
   const ledgerId = typeof event.data.ledgerId === "string" ? event.data.ledgerId : null;
   const playerId = typeof event.data.playerId === "string" ? event.data.playerId : null;
-  if (ledgerId) detail = ((await firestore.get(`ledger/${ledgerId}`))?.data.detail as Record<string, unknown> | undefined) ?? {};
+  if (ledgerId) {
+    const entry = (await firestore.get(`ledger/${ledgerId}`))?.data;
+    detail = (entry?.detail as Record<string, unknown> | undefined) ?? {};
+    delta = Number(entry?.delta ?? 0);
+  }
   if (playerId) {
     const player = await firestore.get(`players/${playerId}`);
     playerName = String(player?.data.name ?? "어느 승객");
     districtId = String(player?.data.districtId ?? "");
   }
-  const text = formatNotification({ kind, playerName, districtId, detail, payload: (event.data.payload as Record<string, unknown>) ?? {} }, notify.bigGamble);
+  const text = formatNotification({ kind, playerName, districtId, detail, delta, payload: (event.data.payload as Record<string, unknown>) ?? {} }, notify.bigGamble);
   // Claim the event first so concurrent calls cannot double-post.
   if (!(await firestore.markSent(event.name, event.updateTime))) return { status: "already-sent" };
   if (!text) return { status: "skipped" };

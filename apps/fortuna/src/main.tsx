@@ -26,6 +26,7 @@ const router = createBrowserRouter([
       { path: "house", lazy: page(() => import("./pages/HousePage.tsx")) },
       { path: "table/:venue/:game", lazy: page(() => import("./games/TablePage.tsx")) },
       { path: "skills", lazy: page(() => import("./pages/SkillsPage.tsx")) },
+      { path: "pvp/:roomId", lazy: page(() => import("./pvp/PvpRoomPage.tsx")) },
       { path: "shop", lazy: page(() => import("./pages/ShopPage.tsx")) },
       { path: "wallet", lazy: page(() => import("./pages/WalletPage.tsx")) },
       { path: "*", element: <Lobby /> },

@@ -1,4 +1,6 @@
-# PvP 도둑잡기 설계 (초안)
+# PvP 도둑잡기 설계
+
+> 구현됨 (2026-10-12): `packages/core/src/pvp`, `packages/data/src/pvp-ops.ts`, `firestore.rules`(PvP 블록), `apps/fortuna/src/pvp`, 테스트 `packages/rules-tests/test/pvp.test.ts`, `e2e/pvp.spec.ts`.
 
 플레이어 2~4명이 공개 방을 열고 들어와 코인을 걸고 겨루는 도둑잡기.
 서버(Cloud Functions) 없이 Firestore 보안 규칙만으로 공정성을 지키고, 연출은 lucky-arcade 도둑잡기에서 이식한다.
