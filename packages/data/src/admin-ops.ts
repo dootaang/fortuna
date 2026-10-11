@@ -19,7 +19,7 @@ async function log(session: Session, kind: string, target: string, amount: numbe
 }
 
 /** Create whatever the city still lacks: settings, districts, vault, joint treasury. Safe to run repeatedly. */
-export async function bootstrapCity(session: Session): Promise<string[]> {
+export async function bootstrapCity(session: Session, options: { pvpDeals?: boolean } = {}): Promise<string[]> {
   const { db } = session, created: string[] = [], batch = writeBatch(db);
   if (!(await getDoc(refs.config(db))).exists()) { batch.set(refs.config(db), finalizeEconomy(DEFAULT_ECONOMY)); created.push("경제 설정"); }
   if (!(await getDoc(refs.notify(db))).exists()) { batch.set(refs.notify(db), DEFAULT_NOTIFY); created.push("알림 설정"); }
@@ -30,6 +30,10 @@ export async function bootstrapCity(session: Session): Promise<string[]> {
   if (!(await getDoc(refs.vault(db))).exists()) { batch.set(refs.vault(db), { amount: economy?.vaultInitial ?? DEFAULT_ECONOMY.vaultInitial, lastLedger: "" }); created.push("지배인 금고"); }
   if (!(await getDoc(refs.treasury(db))).exists()) { batch.set(refs.treasury(db), { amount: 0, lastLedger: "" }); created.push("공동 지갑"); }
   if (created.length) await batch.commit();
+  if (options.pvpDeals !== false) {
+    const { ensurePvpDeals } = await import("./pvp-ops.ts");
+    if (await ensurePvpDeals(session)) created.push("대결 배분표");
+  }
   return created;
 }
 

@@ -129,7 +129,7 @@ service cloud.firestore {
       allow read: if isAdmin() || isPlayer(pid);
       allow create: if isAdmin() && request.resource.data == {
         'playerId': pid, 'balance': 0, 'debt': 0, 'seq': 0, 'arrived': false,
-        'periodIndex': 0, 'workUsed': 0, 'gambleUsed': 0, 'openWager': null
+        'periodIndex': 0, 'workUsed': 0, 'gambleUsed': 0, 'openWager': null, 'room': null
       };
       // 신원 확인은 장부 규칙이 한다(장부는 본인 또는 관리자만 만들 수 있다).
       allow update: if signedIn() && (ledgerBacked(pid) || (isPlayer(pid) && wagerStep()));
@@ -210,6 +210,8 @@ service cloud.firestore {
         || (e.type == 'fundContribution' && fundOk(entryId, e, before, after))
         || (e.type == 'shop' && shopOk(entryId, e, before, after))
         || (e.type == 'itemUse' && itemUseOk(entryId, e, before, after, false))
+        || (e.type == 'pvpStake' && pvpStakeOk(entryId, e, before, after))
+        || (e.type == 'pvpPayout' && pvpPayoutOk(entryId, e, before, after))
       );
     }
 
@@ -443,6 +445,257 @@ service cloud.firestore {
         && ledgerCreatedNow(request.resource.data.lastLedger)
         && getAfter(ledgerPath(request.resource.data.lastLedger)).data.playerId == request.resource.data.playerId;
       allow delete: if isAdmin();
+    }
+
+
+    // ── PvP 도둑잡기 ──
+    // 방 문서는 공개(카드 묶음 포함), 카드 순서는 hands/{pid}에 본인만. 배분은 pvpDeals 표에서 봉인된 시각으로 고른다.
+    function roomPath(id) { return /databases/$(database)/documents/pvpRooms/$(id); }
+    function handPath(roomId, pid) { return /databases/$(database)/documents/pvpRooms/$(roomId)/hands/$(pid); }
+    function dealPath(n, k) { return /databases/$(database)/documents/pvpDeals/$(string(n) + '_' + string(k)); }
+    function pvpConfig() { return get(configPath()).data.pvp; }
+    function seatedIn(room) { return signedIn() && exists(bindingPath()) && myPid() in room.seats && isPlayer(myPid()); }
+    function elapsed(ts, seconds) { return request.time > ts + duration.value(seconds, 's'); }
+    function onlyAdded(before, after, key) {
+      return after.diff(before).addedKeys() == [key].toSet() && after.diff(before).changedKeys().size() == 0 && after.diff(before).removedKeys().size() == 0;
+    }
+    function ledgerOfType(id, type, pid, roomId) {
+      let entry = getAfter(ledgerPath(id)).data;
+      return ledgerCreatedNow(id) && entry.type == type && entry.playerId == pid && entry.detail.roomId == roomId;
+    }
+    function freshTurn(actor, target) {
+      return {'actor': actor, 'target': target, 'since': request.time, 'offerReady': false, 'raised': null, 'reorders': 0, 'pick': null};
+    }
+
+    match /pvpDeals/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /pvpRooms/{roomId} {
+      allow read: if signedIn();
+      allow create: if roomCreateOk(roomId);
+      allow update: if signedIn() && roomUpdateOk(roomId, resource.data, request.resource.data);
+      allow delete: if false;
+
+      match /hands/{pid} {
+        allow read: if signedIn() && isPlayer(pid);
+        allow write: if signedIn() && isPlayer(pid)
+          && request.resource.data.keys().hasOnly(['order'])
+          && request.resource.data.order.size() == getAfter(roomPath(roomId)).data.sets[pid].size()
+          && request.resource.data.order.toSet() == getAfter(roomPath(roomId)).data.sets[pid].toSet();
+      }
+
+      match /presence/{pid} {
+        allow read: if signedIn();
+        allow write: if signedIn() && isPlayer(pid)
+          && request.resource.data.keys().hasOnly(['lastSeen', 'emote', 'emoteAt', 'hover'])
+          && request.resource.data.lastSeen == request.time;
+      }
+    }
+
+    function roomCreateOk(roomId) {
+      let r = request.resource.data;
+      let config = get(configPath()).data;
+      let pid = myPid();
+      return signedIn() && isPlayer(pid) && config.pvp.enabled == true
+        && r.keys().hasOnly(['game', 'venue', 'stake', 'maxSeats', 'rakeBps', 'status', 'hostPid', 'createdAt', 'seats', 'seatCount', 'pot', 'op', 'lastLedger'])
+        && r.game == 'old-maid' && r.op == 'create' && r.status == 'waiting'
+        && (r.venue == 'alley' || (r.venue == 'house' && config.gambling.houseOpen == true))
+        && r.stake is int && r.stake >= config.pvp.minStake && r.stake <= (r.venue == 'house' ? config.pvp.houseMaxStake : config.pvp.alleyMaxStake)
+        && r.rakeBps == (r.venue == 'house' ? config.pvp.houseRakeBps : config.pvp.alleyRakeBps)
+        && r.maxSeats is int && r.maxSeats >= 2 && r.maxSeats <= 4
+        && r.hostPid == pid && r.createdAt == request.time
+        && r.seats.keys().hasOnly([pid]) && r.seats[pid] == {'name': get(playerPath(pid)).data.name, 'joinedAt': request.time}
+        && r.seatCount == 1 && r.pot == r.stake
+        && ledgerOfType(r.lastLedger, 'pvpStake', pid, roomId);
+    }
+
+    function roomUpdateOk(roomId, r0, r1) {
+      let op = r1.op;
+      return (op == 'join' && joinOk(roomId, r0, r1))
+        || (op == 'leave' && leaveOk(roomId, r0, r1))
+        || (op == 'start' && startOk(r0, r1))
+        || (op == 'deal' && dealOk(r0, r1))
+        || (op == 'raise' && offerOk(r0, r1, 'raised'))
+        || (op == 'reorder' && offerOk(r0, r1, 'reorders'))
+        || (op == 'ready' && offerOk(r0, r1, 'offerReady'))
+        || (op == 'pick' && pickOk(r0, r1, false))
+        || (op == 'autoPick' && pickOk(r0, r1, true))
+        || (op == 'resolve' && resolveOk(roomId, r0, r1, false))
+        || (op == 'autoResolve' && resolveOk(roomId, r0, r1, true))
+        || (op == 'claim' && claimOk(roomId, r0, r1))
+        || ((op == 'cancel' || op == 'abandon' || op == 'void') && closeOk(r0, r1));
+    }
+
+    function joinOk(roomId, r0, r1) {
+      let pid = myPid();
+      return r0.status == 'waiting' && isPlayer(pid) && !(pid in r0.seats) && r0.seatCount < r0.maxSeats
+        && onlyChanged(r0, r1, ['seats', 'seatCount', 'pot', 'op', 'lastLedger'])
+        && onlyAdded(r0.seats, r1.seats, pid)
+        && r1.seats[pid] == {'name': get(playerPath(pid)).data.name, 'joinedAt': request.time}
+        && r1.seatCount == r0.seatCount + 1 && r1.pot == r0.pot + r0.stake
+        && ledgerOfType(r1.lastLedger, 'pvpStake', pid, roomId);
+    }
+
+    function leaveOk(roomId, r0, r1) {
+      let pid = myPid();
+      return r0.status == 'waiting' && isPlayer(pid) && pid in r0.seats
+        && onlyChanged(r0, r1, ['seats', 'seatCount', 'pot', 'op', 'lastLedger', 'hostPid', 'status'])
+        && r1.seats.diff(r0.seats).removedKeys() == [pid].toSet() && r1.seats.diff(r0.seats).addedKeys().size() == 0
+        && r1.seatCount == r0.seatCount - 1 && r1.pot == r0.pot - r0.stake
+        && (r1.seatCount == 0
+              ? r1.status == 'closed'
+              : (r1.status == 'waiting' && r1.hostPid in r1.seats && (r0.hostPid == pid || r1.hostPid == r0.hostPid)))
+        && ledgerOfType(r1.lastLedger, 'pvpPayout', pid, roomId);
+    }
+
+    function startOk(r0, r1) {
+      let n = r0.seatCount;
+      return r0.status == 'waiting' && r0.hostPid == myPid() && isPlayer(myPid()) && n >= 2
+        && onlyChanged(r0, r1, ['status', 'op', 'order', 'pos', 'startedAt'])
+        && r1.status == 'dealing' && r1.startedAt == request.time
+        && r1.order.size() == n && r1.order.toSet() == r0.seats.keys().toSet()
+        && r1.pos.size() == n && r1.pos[r1.order[0]] == 0 && r1.pos[r1.order[1]] == 1
+        && (n < 3 || r1.pos[r1.order[2]] == 2) && (n < 4 || r1.pos[r1.order[3]] == 3);
+    }
+
+    // 배분은 표에서 그대로: 봉인된 시작 시각이 표 번호를 정한다.
+    function dealOk(r0, r1) {
+      let n = r0.seatCount;
+      let k = r0.startedAt.toMillis() % 256;
+      let table = get(dealPath(n, k)).data;
+      return r0.status == 'dealing' && seatedIn(r0)
+        && onlyChanged(r0, r1, ['status', 'op', 'dealIndex', 'sets', 'discards', 'turn', 'moves', 'lastMove'])
+        && r1.status == 'playing' && r1.dealIndex == k && r1.sets.size() == n
+        && r1.sets[r0.order[0]] == table.seats['0'] && r1.sets[r0.order[1]] == table.seats['1']
+        && (n < 3 || r1.sets[r0.order[2]] == table.seats['2']) && (n < 4 || r1.sets[r0.order[3]] == table.seats['3'])
+        && r1.discards == table.discards && r1.moves == 0 && r1.lastMove == null
+        && r1.turn == freshTurn(r0.order[0], r0.order[1]);
+    }
+
+    // 제시자(뽑히는 사람)의 공개 동작: 카드 내밀기, 재배열 횟수, 준비 완료.
+    function offerOk(r0, r1, field) {
+      let t0 = r0.turn;
+      let t1 = r1.turn;
+      return r0.status == 'playing' && t0.target == myPid() && isPlayer(myPid()) && t0.pick == null
+        && onlyChanged(r0, r1, ['turn', 'op']) && onlyChanged(t0, t1, [field])
+        && (field != 'raised' || t1.raised == null || (t1.raised is int && t1.raised >= 0 && t1.raised < r0.sets[t0.target].size()))
+        && (field != 'reorders' || (t1.reorders == t0.reorders + 1 && t1.reorders <= 3))
+        && (field != 'offerReady' || t1.offerReady == true);
+    }
+
+    // 뽑기 지정. 대행(auto)은 시간 초과 뒤 누구나, 위치는 봉인된 시각으로 정해진다(index null).
+    function pickOk(r0, r1, auto) {
+      let t0 = r0.turn;
+      let t1 = r1.turn;
+      let pvp = pvpConfig();
+      return r0.status == 'playing' && t0.pick == null
+        && onlyChanged(r0, r1, ['turn', 'op']) && onlyChanged(t0, t1, ['pick'])
+        && (auto
+              ? (seatedIn(r0) && elapsed(t0.since, pvp.offerSeconds + pvp.pickSeconds)
+                 && t1.pick == {'index': null, 'at': request.time, 'auto': true})
+              : (t0.actor == myPid() && isPlayer(myPid())
+                 && (t0.offerReady == true || elapsed(t0.since, pvp.offerSeconds))
+                 && t1.pick.keys().hasOnly(['index', 'at', 'auto'])
+                 && t1.pick.index is int && t1.pick.index >= 0 && t1.pick.index < r0.sets[t0.target].size()
+                 && t1.pick.at == request.time && t1.pick.auto == false));
+    }
+
+    // 카드 넘기기. 제시자는 자기 비공개 순서에서 정확히 그 위치의 카드를, 대행은 공개 묶음에서 봉인된 시각 위치의 카드를.
+    function resolveOk(roomId, r0, r1, auto) {
+      let t0 = r0.turn;
+      let pick = t0.pick;
+      let b = t0.target;
+      let from = r0.sets[b];
+      let order = auto ? from : get(handPath(roomId, b)).data.order;
+      let index = (auto || pick.index == null) ? pick.at.toMillis() % from.size() : pick.index;
+      return r0.status == 'playing' && pick != null
+        && (auto
+              ? (seatedIn(r0) && elapsed(pick.at, pvpConfig().resolveSeconds))
+              : (b == myPid() && isPlayer(b) && order.size() == from.size() && order.toSet() == from.toSet()))
+        && drawOk(r0, r1, t0.actor, b, order[index], auto);
+    }
+
+    function partnerCard(card) {
+      return card == 'joker' ? 'none' : ((card.split('-')[0] == 'hearts' ? 'spades' : 'hearts') + '-' + card.split('-')[1]);
+    }
+
+    function drawOk(r0, r1, a, b, card, auto) {
+      let partner = partnerCard(card);
+      let paired = partner in r0.sets[a];
+      let fromAfter = r0.sets[b].removeAll([card]);
+      let toAfter = paired ? r0.sets[a].removeAll([partner]) : r0.sets[a].concat([card]);
+      let thrown = paired ? [card, partner] : [];
+      let emptied = (fromAfter.size() == 0 ? [b] : []).concat(toAfter.size() == 0 ? [a] : []);
+      return r1.sets.diff(r0.sets).affectedKeys().hasOnly([a, b])
+        && r1.sets[a] == toAfter && r1.sets[b] == fromAfter
+        && r1.discards == r0.discards.concat(thrown)
+        && r1.moves == r0.moves + 1
+        && r1.lastMove == {'actor': a, 'target': b, 'card': card, 'thrown': thrown, 'auto': auto, 'at': request.time}
+        && (emptied.size() == 0
+              ? (onlyChanged(r0, r1, ['sets', 'discards', 'moves', 'lastMove', 'turn', 'op'])
+                 && r1.turn == freshTurn(b, r0.order[(r0.pos[b] + 1) % r0.order.size()]))
+              : finishOk(r0, r1, emptied));
+    }
+
+    // 승자독식: 먼저 턴 사람(동시면 나눔)이 수수료를 뺀 판을 가져간다.
+    function finishOk(r0, r1, emptied) {
+      let w = emptied.size();
+      let net = r0.pot - r1.rake;
+      return onlyChanged(r0, r1, ['sets', 'discards', 'moves', 'lastMove', 'turn', 'op', 'status', 'winners', 'jokerHolder', 'rake', 'share', 'remainder', 'claimed'])
+        && r1.status == 'finished' && r1.turn == null && r1.winners == emptied
+        && r1.jokerHolder in r1.sets && 'joker' in r1.sets[r1.jokerHolder]
+        && isBpsFloor(r1.rake, r0.pot, r0.rakeBps)
+        && r1.share is int && r1.share * w <= net && (r1.share + 1) * w > net
+        && r1.remainder == net - r1.share * w
+        && r1.claimed == {};
+    }
+
+    function claimOk(roomId, r0, r1) {
+      let pid = myPid();
+      let claimed = r0.get('claimed', {});
+      return (r0.status == 'finished' || r0.status == 'void') && isPlayer(pid) && pid in r0.seats && !(pid in claimed)
+        && onlyChanged(r0, r1, ['claimed', 'op', 'lastLedger'])
+        && onlyAdded(claimed, r1.claimed, pid) && r1.claimed[pid] == true
+        && ledgerOfType(r1.lastLedger, 'pvpPayout', pid, roomId);
+    }
+
+    // 방장 취소(대기 중), 오래 버려진 대기실 정리, 딜러의 강제 무효. 무효가 되면 각자 판돈을 돌려받는다.
+    function closeOk(r0, r1) {
+      return onlyChanged(r0, r1, ['status', 'op', 'claimed']) && r1.status == 'void' && r1.claimed == {}
+        && ((r1.op == 'cancel' && r0.status == 'waiting' && r0.hostPid == myPid() && isPlayer(myPid()))
+            || (r1.op == 'abandon' && r0.status == 'waiting' && seatedIn(r0) && elapsed(r0.createdAt, pvpConfig().abandonMinutes * 60))
+            || (r1.op == 'void' && isAdmin() && (r0.status == 'waiting' || r0.status == 'dealing' || r0.status == 'playing')));
+    }
+
+    function pvpStakeOk(entryId, e, before, after) {
+      let d = e.detail;
+      let room = getAfter(roomPath(d.roomId)).data;
+      return d.keys().hasOnly(['roomId', 'stake', 'venue'])
+        && before.get('room', null) == null && after.room == d.roomId
+        && room.lastLedger == entryId && d.stake == room.stake && d.venue == room.venue
+        && e.delta == -d.stake && e.debtDelta == 0 && e.vaultDelta == 0
+        && onlyChanged(before, after, ['balance', 'seq', 'room']);
+    }
+
+    function pvpPayoutOk(entryId, e, before, after) {
+      let d = e.detail;
+      let r0 = get(roomPath(d.roomId)).data;
+      let r1 = getAfter(roomPath(d.roomId)).data;
+      let pid = e.playerId;
+      let won = r0.status == 'finished' && pid in r0.winners;
+      let amount = (d.kind == 'leave' || d.kind == 'refund') ? r0.stake : (won ? r0.share : 0);
+      let houseCut = (r0.status == 'finished' && r0.winners[0] == pid) ? r0.rake + r0.remainder : 0;
+      return d.keys().hasOnly(['roomId', 'kind'])
+        && before.get('room', null) == d.roomId && after.room == null
+        && r1.lastLedger == entryId
+        && ((d.kind == 'leave' && r0.status == 'waiting' && r1.op == 'leave')
+            || (d.kind == 'refund' && r0.status == 'void' && r1.op == 'claim')
+            || (d.kind == (won ? 'win' : 'lose') && r0.status == 'finished' && r1.op == 'claim'))
+        && e.delta == amount && e.debtDelta == 0
+        && e.vaultDelta == (d.kind == 'win' || d.kind == 'lose' ? houseCut : 0)
+        && onlyChanged(before, after, ['balance', 'seq', 'room']);
     }
 
     // ── 디스코드 알림 ──

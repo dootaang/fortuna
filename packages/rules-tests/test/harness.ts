@@ -62,7 +62,7 @@ export async function signOutAll(): Promise<void> { for (const app of apps) awai
 /** Bootstrapped city with one registered, bound (not yet arrived) player. */
 export async function cityWithPlayer(name = "에이든", districtId = "medieval", skills = [{ id: "sword", name: "검술", level: 4 }]) {
   const admin = await adminSession();
-  await bootstrapCity(admin);
+  await bootstrapCity(admin, { pvpDeals: false });
   const { pid, code } = await createPlayer(admin, { name, districtId, skills, note: "" });
   const browser = await anonymousSession();
   await bindAccessCode(browser, code);
@@ -82,4 +82,12 @@ export async function asRoot<T>(fn: (db: RootDb) => Promise<T>): Promise<T> {
 /** Read one document's data with rules disabled. */
 export async function rootData(path: string): Promise<Record<string, any> | undefined> {
   return asRoot(async (root) => (await root.doc(path).get()).data());
+}
+
+/** Register another player and bind a fresh browser to them. */
+export async function addPlayer(admin: Session, name: string, districtId = "downtown"): Promise<PlayerSession> {
+  const { pid, code } = await createPlayer(admin, { name, districtId, skills: [], note: "" });
+  const browser = await anonymousSession();
+  await bindAccessCode(browser, code);
+  return { ...browser, pid };
 }

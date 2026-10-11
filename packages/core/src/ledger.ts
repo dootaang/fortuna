@@ -3,7 +3,7 @@ import type { GameId, Venue, WagerTrace } from "./games/types.ts";
 /** Firestore Timestamp without importing the SDK into the pure core. */
 export interface TimestampLike { toMillis(): number; }
 
-export const LEDGER_TYPES = ["arrival", "work", "betOpen", "betSettle", "skill", "repay", "jointDeposit", "fundContribution", "shop", "itemUse", "adminAdjust"] as const;
+export const LEDGER_TYPES = ["arrival", "work", "betOpen", "betSettle", "skill", "repay", "jointDeposit", "fundContribution", "shop", "itemUse", "adminAdjust", "pvpStake", "pvpPayout"] as const;
 export type LedgerType = (typeof LEDGER_TYPES)[number];
 
 export interface WagerStep<T = TimestampLike> { a: string; t: T; }
@@ -45,6 +45,8 @@ export interface Wallet<T = TimestampLike> {
   workUsed: number;
   gambleUsed: number;
   openWager: OpenWager<T> | null;
+  /** PvP room this player is seated in (one at a time). Missing on wallets created before PvP. */
+  room?: string | null;
 }
 
 /** ledger/{playerId}_{seq}; append-only. */
@@ -79,6 +81,8 @@ export const LEDGER_LABELS: Readonly<Record<LedgerType, string>> = {
   shop: "상점 구매",
   itemUse: "물품 사용",
   adminAdjust: "딜러 조정",
+  pvpStake: "대결 판돈",
+  pvpPayout: "대결 정산",
 };
 
 /** Ledger filter groups for the admin history view. */
@@ -92,8 +96,9 @@ export const LEDGER_GROUPS: Readonly<Record<string, readonly LedgerType[]>> = {
   "공동·모금": ["jointDeposit", "fundContribution"],
   "관리자 조정": ["adminAdjust"],
   도착: ["arrival"],
+  대결: ["pvpStake", "pvpPayout"],
 };
 
 export function emptyWallet(playerId: string): Wallet<never> {
-  return { playerId, balance: 0, debt: 0, seq: 0, arrived: false, periodIndex: 0, workUsed: 0, gambleUsed: 0, openWager: null };
+  return { playerId, balance: 0, debt: 0, seq: 0, arrived: false, periodIndex: 0, workUsed: 0, gambleUsed: 0, openWager: null, room: null };
 }

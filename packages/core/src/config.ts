@@ -32,6 +32,23 @@ export interface EconomyConfig {
   };
   skill: { costs: number[]; cumulative: number[] };
   vaultInitial: number;
+  /** Player-vs-player tables (도둑잡기). Not counted against the daily gamble limit. */
+  pvp: {
+    enabled: boolean;
+    minStake: number;
+    alleyMaxStake: number;
+    houseMaxStake: number;
+    alleyRakeBps: number;
+    houseRakeBps: number;
+    /** Target may rearrange before the drawer can pick anyway. */
+    offerSeconds: number;
+    /** Drawer must pick within this, or anyone seated may pick for them. */
+    pickSeconds: number;
+    /** Target must hand over the card within this, or anyone seated may resolve it. */
+    resolveSeconds: number;
+    /** A waiting room older than this can be closed by anyone (stakes refunded). */
+    abandonMinutes: number;
+  };
 }
 
 export const DEFAULT_SKILL_COSTS = [0, 10, 30, 100, 300, 1_000, 3_000, 10_000, 30_000, 100_000, 300_000] as const;
@@ -52,6 +69,7 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   gambling: { limit: 30, minBet: 10, alleyMaxBet: 200, houseMaxBet: 2_000, houseOpen: false, games: defaultGames() },
   skill: { costs: [...DEFAULT_SKILL_COSTS], cumulative: cumulativeCosts(DEFAULT_SKILL_COSTS) },
   vaultInitial: 1_000_000,
+  pvp: { enabled: true, minStake: 10, alleyMaxStake: 200, houseMaxStake: 2_000, alleyRakeBps: 0, houseRakeBps: 500, offerSeconds: 12, pickSeconds: 20, resolveSeconds: 8, abandonMinutes: 30 },
 };
 
 /** cumulative[n] = costs[1] + … + costs[n]; cumulative[0] = 0. */
@@ -73,6 +91,7 @@ export function normalizeEconomy(raw: unknown): EconomyConfig {
   const gambling = isRecord(source.gambling) ? source.gambling : {};
   const skill = isRecord(source.skill) ? source.skill : {};
   const storedGames = isRecord(gambling.games) ? gambling.games : {};
+  const pvp = isRecord(source.pvp) ? source.pvp : {};
   const games = Object.fromEntries(GAME_IDS.map((id) => {
     const perGame = isRecord(storedGames[id]) ? storedGames[id] : {};
     return [id, Object.fromEntries(VENUES.map((venue) => {
@@ -98,6 +117,13 @@ export function normalizeEconomy(raw: unknown): EconomyConfig {
     },
     skill: { costs, cumulative: cumulativeCosts(costs) },
     vaultInitial: int(source.vaultInitial, d.vaultInitial),
+    pvp: {
+      enabled: typeof pvp.enabled === "boolean" ? pvp.enabled : d.pvp.enabled,
+      minStake: int(pvp.minStake, d.pvp.minStake, 1), alleyMaxStake: int(pvp.alleyMaxStake, d.pvp.alleyMaxStake, 1), houseMaxStake: int(pvp.houseMaxStake, d.pvp.houseMaxStake, 1),
+      alleyRakeBps: int(pvp.alleyRakeBps, d.pvp.alleyRakeBps, 0, 10_000), houseRakeBps: int(pvp.houseRakeBps, d.pvp.houseRakeBps, 0, 10_000),
+      offerSeconds: int(pvp.offerSeconds, d.pvp.offerSeconds, 1, 600), pickSeconds: int(pvp.pickSeconds, d.pvp.pickSeconds, 1, 600),
+      resolveSeconds: int(pvp.resolveSeconds, d.pvp.resolveSeconds, 1, 600), abandonMinutes: int(pvp.abandonMinutes, d.pvp.abandonMinutes, 1, 10_000),
+    },
   };
 }
 
