@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { getDoc, limit, orderBy, query, where, type Timestamp } from "firebase/firestore";
-import { LEDGER_LABELS, TEXT, borrowDebt, fill, skillCost, usedThisWeek, type LedgerEntry } from "@fortuna/core";
+import { LEDGER_LABELS, TEXT, borrowDebt, fill, skillCost, usesLeft, type LedgerEntry } from "@fortuna/core";
 import { depositJoint, friendlyError, paySkill, refs, repayDebt, useItem, type InventoryDoc } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { useLiveQuery, type Row } from "../session/live.ts";
@@ -17,8 +17,8 @@ export default function WalletPage() {
         <div className="grid grid-cols-2 gap-y-2 sm:grid-cols-4 sm:divide-x sm:divide-gold-400/20">
           <Stat label={TEXT.wallet.balance} tone="gold"><Coins value={wallet.balance} /></Stat>
           <Stat label={TEXT.wallet.debt} tone={wallet.debt ? "ruby" : "jade"}><span className="num">{wallet.debt.toLocaleString("ko-KR")}</span></Stat>
-          <Stat label={TEXT.wallet.workLeft}><span className="num">{Math.max(0, config.work.weeklyLimit - usedThisWeek(wallet, "work", now))}</span></Stat>
-          <Stat label={TEXT.wallet.gambleLeft}><span className="num">{Math.max(0, config.gambling.weeklyLimit - usedThisWeek(wallet, "gamble", now))}</span></Stat>
+          <Stat label={TEXT.wallet.workLeft}><span className="num">{usesLeft(wallet, config, "work", now)}</span></Stat>
+          <Stat label={TEXT.wallet.gambleLeft}><span className="num">{usesLeft(wallet, config, "gamble", now)}</span></Stat>
         </div>
       </Frame>
       <SkillPayment />

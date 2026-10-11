@@ -1,5 +1,5 @@
 import { increment, serverTimestamp, type Firestore, type Timestamp, type Transaction } from "firebase/firestore";
-import { ledgerId, weekIndexAt, type LedgerType, type Wallet } from "@fortuna/core";
+import { ledgerId, periodIndexAt, weekIndexAt, type LedgerType, type LimitPeriod, type Wallet } from "@fortuna/core";
 import { refs, type EventKind } from "./refs.ts";
 
 export class FortunaError extends Error {
@@ -11,6 +11,7 @@ export class Clock {
   offsetMs = 0;
   now(): number { return Date.now() + this.offsetMs; }
   week(): number { return weekIndexAt(this.now()); }
+  period(period: LimitPeriod): number { return periodIndexAt(this.now(), period); }
 }
 
 export interface Session { db: Firestore; uid: string; clock: Clock; }

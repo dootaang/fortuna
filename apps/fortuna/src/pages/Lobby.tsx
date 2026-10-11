@@ -1,14 +1,13 @@
 import { Link } from "react-router";
-import { GAME_CONTENT, TEXT, usedThisWeek, weekStartMs } from "@fortuna/core";
+import { GAME_CONTENT, TEXT, periodIndexAt, periodStartMs, periodWords, usesLeft } from "@fortuna/core";
 import { usePlayer } from "../session/player.tsx";
 import { Coins, Frame, Ornament, Stat, cx, formatDate } from "../ui/kit.tsx";
 
 export function Lobby() {
   const { player, wallet, config, district, content, vault, treasury, session } = usePlayer();
   const now = session.clock.now();
-  const workLeft = Math.max(0, config.work.weeklyLimit - usedThisWeek(wallet, "work", now));
-  const gambleLeft = Math.max(0, config.gambling.weeklyLimit - usedThisWeek(wallet, "gamble", now));
-  const nextReset = weekStartMs(session.clock.week() + 1);
+  const workLeft = usesLeft(wallet, config, "work", now), gambleLeft = usesLeft(wallet, config, "gamble", now);
+  const nextReset = periodStartMs(periodIndexAt(now, config.limitPeriod) + 1, config.limitPeriod);
   const deduction = district?.liberated ? 0 : (district?.deductionBps ?? 0) / 100;
   const open = wallet.openWager;
 
@@ -32,10 +31,10 @@ export function Lobby() {
         <div className="grid grid-cols-2 gap-y-2 sm:grid-cols-4 sm:divide-x sm:divide-gold-400/20">
           <Stat label="잔액" tone="gold"><Coins value={wallet.balance} /></Stat>
           <Stat label="빚" tone={wallet.debt > 0 ? "ruby" : "jade"}><span className="num">{wallet.debt.toLocaleString("ko-KR")}</span></Stat>
-          <Stat label="남은 일"><span className="num">{workLeft}</span><span className="text-sm text-mist"> / {config.work.weeklyLimit}</span></Stat>
-          <Stat label="남은 판"><span className="num">{gambleLeft}</span><span className="text-sm text-mist"> / {config.gambling.weeklyLimit}</span></Stat>
+          <Stat label={`${periodWords(config.limitPeriod).now} 남은 일`}><span className="num">{workLeft}</span><span className="text-sm text-mist"> / {config.work.limit}</span></Stat>
+          <Stat label={`${periodWords(config.limitPeriod).now} 남은 판`}><span className="num">{gambleLeft}</span><span className="text-sm text-mist"> / {config.gambling.limit}</span></Stat>
         </div>
-        <p className="mt-3 text-center text-xs text-mist">다음 주간 초기화: {formatDate(nextReset)} (월요일 0시)</p>
+        <p className="mt-3 text-center text-xs text-mist">다음 초기화: {formatDate(nextReset)} ({periodWords(config.limitPeriod).reset})</p>
       </Frame>
 
       <div className="grid gap-3 sm:grid-cols-2">

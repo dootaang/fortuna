@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { TEXT, WORK_TEMPLATES, usedThisWeek, type WorkTemplate } from "@fortuna/core";
+import { TEXT, WORK_TEMPLATES, limitReachedText, periodWords, usesLeft, type WorkTemplate } from "@fortuna/core";
 import { usePlayer } from "../session/player.tsx";
 import { Frame, Notice, PageTitle } from "../ui/kit.tsx";
 
@@ -12,19 +12,19 @@ const TEMPLATE_HINT: Record<WorkTemplate, string> = {
 
 export default function WorkHub() {
   const { wallet, config, content, district, session } = usePlayer();
-  const used = usedThisWeek(wallet, "work", session.clock.now()), left = Math.max(0, config.work.weeklyLimit - used);
+  const left = usesLeft(wallet, config, "work", session.clock.now());
   const deductionPct = district?.liberated ? 0 : (district?.deductionBps ?? 0) / 100;
   return (
     <div>
       <PageTitle eyebrow={`${content.emblem} ${content.name}`} title={TEXT.lobby.work} />
       <Frame className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <span>이번 주 남은 일 <b className="num text-gold-200">{left}</b> / {config.work.weeklyLimit}</span>
+          <span>{periodWords(config.limitPeriod).now} 남은 일 <b className="num text-gold-200">{left}</b> / {config.work.limit}</span>
           <span>기본 임금 <b className="num text-gold-200">{config.work.baseWage}</b> <span className="text-mist">({config.work.wageMin}~{config.work.wageMax})</span></span>
           <span className={district?.liberated ? "chip chip-jade" : "chip chip-ruby"}>{district?.liberated ? "해방 구역 · 공제 없음" : `지배인 몫 ${deductionPct}%`}</span>
         </div>
       </Frame>
-      {left === 0 && <div className="mb-4"><Notice>{TEXT.work.limitReached}</Notice></div>}
+      {left === 0 && <div className="mb-4"><Notice>{limitReachedText(config, "work")}</Notice></div>}
       <div className="grid gap-3 sm:grid-cols-2">
         {WORK_TEMPLATES.map((template) => {
           const skin = content.work[template];

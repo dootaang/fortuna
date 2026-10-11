@@ -35,6 +35,13 @@ service cloud.firestore {
       return int(math.floor((request.time.toMillis() + 32400000 - 345600000) / 604800000));
     }
 
+    function curDay() {
+      return int(math.floor((request.time.toMillis() + 32400000) / 86400000));
+    }
+
+    // config.limitPeriod: 'day'(기본) 또는 'week'. packages/core/src/week.ts와 같은 공식.
+    function curPeriod(period) { return period == 'week' ? curWeek() : curDay(); }
+
     // floor(value * bps / 10000) == result, 정수 연산만으로.
     function isBpsFloor(result, value, bps) {
       return result is int && result * 10000 <= value * bps && (result + 1) * 10000 > value * bps;
@@ -42,13 +49,13 @@ service cloud.firestore {
 
     function onlyChanged(before, after, keys) { return after.diff(before).affectedKeys().hasOnly(keys); }
 
-    // 주간 사용 횟수: 주가 바뀌었으면 0부터 다시 센다.
-    function countersOk(before, after, kind, limit) {
-      let week = curWeek();
-      let fresh = before.weekIndex != week;
+    // 사용 횟수: 주기(하루/주)가 바뀌었으면 0부터 다시 센다.
+    function countersOk(before, after, kind, limit, period) {
+      let current = curPeriod(period);
+      let fresh = before.periodIndex != current;
       let workBase = fresh ? 0 : before.workUsed;
       let gambleBase = fresh ? 0 : before.gambleUsed;
-      return after.weekIndex == week
+      return after.periodIndex == current
         && after.workUsed == workBase + (kind == 'work' ? 1 : 0)
         && after.gambleUsed == gambleBase + (kind == 'gamble' ? 1 : 0)
         && (kind == 'work' ? after.workUsed <= limit : after.gambleUsed <= limit);
@@ -122,7 +129,7 @@ service cloud.firestore {
       allow read: if isAdmin() || isPlayer(pid);
       allow create: if isAdmin() && request.resource.data == {
         'playerId': pid, 'balance': 0, 'debt': 0, 'seq': 0, 'arrived': false,
-        'weekIndex': 0, 'workUsed': 0, 'gambleUsed': 0, 'openWager': null
+        'periodIndex': 0, 'workUsed': 0, 'gambleUsed': 0, 'openWager': null
       };
       // 신원 확인은 장부 규칙이 한다(장부는 본인 또는 관리자만 만들 수 있다).
       allow update: if signedIn() && (ledgerBacked(pid) || (isPlayer(pid) && wagerStep()));
@@ -217,7 +224,8 @@ service cloud.firestore {
     }
 
     function workOk(e, before, after) {
-      let work = get(configPath()).data.work;
+      let config = get(configPath()).data;
+      let work = config.work;
       let d = e.detail;
       let player = get(playerPath(e.playerId)).data;
       let district = get(/databases/$(database)/documents/districts/$(player.districtId)).data;
@@ -231,12 +239,13 @@ service cloud.firestore {
         && isBpsFloor(d.deduction, d.gross, bps)
         && d.net == d.gross - d.deduction
         && e.delta == d.net && e.debtDelta == 0 && e.vaultDelta == d.deduction
-        && countersOk(before, after, 'work', work.weeklyLimit)
-        && onlyChanged(before, after, ['balance', 'seq', 'weekIndex', 'workUsed', 'gambleUsed']);
+        && countersOk(before, after, 'work', work.limit, config.limitPeriod)
+        && onlyChanged(before, after, ['balance', 'seq', 'periodIndex', 'workUsed', 'gambleUsed']);
     }
 
     function betOpenOk(entryId, e, before, after) {
-      let gambling = get(configPath()).data.gambling;
+      let config = get(configPath()).data;
+      let gambling = config.gambling;
       let d = e.detail;
       let table = gambling.games[d.game][d.venue];
       let maxBet = d.venue == 'house' ? gambling.houseMaxBet : gambling.alleyMaxBet;
@@ -252,8 +261,8 @@ service cloud.firestore {
           'maxMultiplier': table.maxMultiplier, 'params': table.params,
           'openedAt': request.time, 'stepCount': 0, 'steps': {}
         }
-        && countersOk(before, after, 'gamble', gambling.weeklyLimit)
-        && onlyChanged(before, after, ['balance', 'seq', 'weekIndex', 'workUsed', 'gambleUsed', 'openWager']);
+        && countersOk(before, after, 'gamble', gambling.limit, config.limitPeriod)
+        && onlyChanged(before, after, ['balance', 'seq', 'periodIndex', 'workUsed', 'gambleUsed', 'openWager']);
     }
 
     // 지급액은 판돈 × 최대 배수를 넘을 수 없다. 실제 결과는 관리자 감사(재생)로 검증한다.

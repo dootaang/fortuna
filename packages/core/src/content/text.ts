@@ -45,7 +45,7 @@ export const TEXT = {
   },
 
   work: {
-    limitReached: "이번 주 일을 모두 했습니다. 월요일 0시에 다시 채워집니다.",
+    limitReached: "{now} 일을 모두 했습니다. {reset}에 다시 채워집니다.",
     slipTitle: "임금 명세서",
     wage: "임금",
     deduction: "지배인 몫",
@@ -54,7 +54,7 @@ export const TEXT = {
   },
 
   gamble: {
-    limitReached: "이번 주 도박 횟수를 모두 썼습니다. 월요일 0시에 다시 채워집니다.",
+    limitReached: "{now} 도박 횟수를 모두 썼습니다. {reset}에 다시 채워집니다.",
     betLabel: "판돈",
     open: "판을 연다",
     resume: "진행 중인 판이 있습니다.",

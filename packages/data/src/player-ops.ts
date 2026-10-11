@@ -1,6 +1,6 @@
 import { getDoc, increment, runTransaction, serverTimestamp, setDoc, type Firestore, type Timestamp, type Transaction } from "firebase/firestore";
 import {
-  GAMES, accessCodeHash, arrivalSlip, borrowDebt, bumpCounters, normalizeEconomy, replayWager, skillCost, wageFor, wageSlip, wagerTrace,
+  GAMES, accessCodeHash, arrivalSlip, borrowDebt, bumpCounters, normalizeEconomy, periodWords, replayWager, skillCost, wageFor, wageSlip, wagerTrace,
   type GameId, type Venue, type Wallet, type WorkTemplate,
 } from "@fortuna/core";
 import { FortunaError, writeEntry, type Clock, type PlayerSession, type Session } from "./ledger-write.ts";
@@ -64,8 +64,8 @@ export async function submitWork(session: PlayerSession, template: WorkTemplate,
     if (!player) throw new FortunaError("no-player", "등록되지 않은 승객입니다.");
     const district = (await tx.get(refs.district(session.db, player.districtId))).data();
     if (!district) throw new FortunaError("no-district", "소속 구역 정보가 없습니다. 딜러에게 문의하세요.");
-    const week = session.clock.week(), counters = bumpCounters(wallet, "work", week);
-    if (counters.workUsed > config.work.weeklyLimit) throw new FortunaError("work-limit", "이번 주 일을 모두 했습니다.");
+    const counters = bumpCounters(wallet, "work", session.clock.period(config.limitPeriod));
+    if (counters.workUsed > config.work.limit) throw new FortunaError("work-limit", `${periodWords(config.limitPeriod).now} 일을 모두 했습니다.`);
     const rounded = Math.round(performance * 1000) / 1000;
     const slip = wageSlip(wageFor(rounded, config.work), district);
     const ledgerId = writeEntry(tx, session, session.pid, wallet, {
@@ -87,8 +87,8 @@ export async function openBet(session: PlayerSession, game: GameId, venue: Venue
     if (!table.enabled) throw new FortunaError("table-closed", "이 테이블은 지금 닫혀 있습니다.");
     const maxBet = venue === "house" ? config.gambling.houseMaxBet : config.gambling.alleyMaxBet;
     if (!Number.isInteger(bet) || bet < config.gambling.minBet || bet > maxBet) throw new FortunaError("bet-range", `판돈은 ${config.gambling.minBet}~${maxBet}코인 사이여야 합니다.`);
-    const counters = bumpCounters(wallet, "gamble", session.clock.week());
-    if (counters.gambleUsed > config.gambling.weeklyLimit) throw new FortunaError("gamble-limit", "이번 주 도박 횟수를 모두 썼습니다.");
+    const counters = bumpCounters(wallet, "gamble", session.clock.period(config.limitPeriod));
+    if (counters.gambleUsed > config.gambling.limit) throw new FortunaError("gamble-limit", `${periodWords(config.limitPeriod).now} 도박 횟수를 모두 썼습니다.`);
     const wagerId = `${session.pid}_${wallet.seq + 1}`;
     return writeEntry(tx, session, session.pid, wallet, {
       type: "betOpen", actor: "player", delta: -bet, vaultDelta: venue === "house" ? bet : 0,

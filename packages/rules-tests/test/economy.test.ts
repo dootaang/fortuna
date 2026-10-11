@@ -34,7 +34,7 @@ describe("work", () => {
     const { player, pid } = await arrived();
     const result = await submitWork(player, "sort", 0.5);
     expect(result).toMatchObject({ gross: 200, deduction: 100, net: 100, deductionBps: 5_000 });
-    expect(await rootData(`wallets/${pid}`)).toMatchObject({ balance: 1_000, workUsed: 1, weekIndex: player.clock.week() });
+    expect(await rootData(`wallets/${pid}`)).toMatchObject({ balance: 1_000, workUsed: 1, periodIndex: player.clock.period("day") });
     expect((await rootData("vault/main"))?.amount).toBe(1_000_200);
   });
 
@@ -44,10 +44,10 @@ describe("work", () => {
     expect(await submitWork(player, "timing", 1)).toMatchObject({ gross: 250, deduction: 0, net: 250 });
   });
 
-  it("stops at the weekly limit", async () => {
+  it("stops at the daily limit", async () => {
     const { admin, player } = await arrived();
     const config = normalizeEconomy((await getDoc(refs.config(admin.db))).data());
-    await saveEconomy(admin, { ...config, work: { ...config.work, weeklyLimit: 2 } }, config);
+    await saveEconomy(admin, { ...config, work: { ...config.work, limit: 2 } }, config);
     await submitWork(player, "sort", 0.5);
     await submitWork(player, "sort", 0.5);
     await expect(submitWork(player, "sort", 0.5)).rejects.toMatchObject({ code: "work-limit" });
@@ -57,7 +57,7 @@ describe("work", () => {
     const { player, pid } = await arrived();
     const forge = (gross: number, deduction: number) => {
       const batch = writeBatch(player.db);
-      batch.update(refs.wallet(player.db, pid), { balance: 900 + gross - deduction, seq: 2, weekIndex: player.clock.week(), workUsed: 1, gambleUsed: 0 });
+      batch.update(refs.wallet(player.db, pid), { balance: 900 + gross - deduction, seq: 2, periodIndex: player.clock.period("day"), workUsed: 1, gambleUsed: 0 });
       batch.set(refs.ledger(player.db, `${pid}_2`), {
         playerId: pid, seq: 2, type: "work", delta: gross - deduction, debtDelta: 0, vaultDelta: deduction, balanceAfter: 900 + gross - deduction, debtAfter: 1_500,
         weekIndex: player.clock.week(), actor: "player", actorUid: player.uid, memo: "",

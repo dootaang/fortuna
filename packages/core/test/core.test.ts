@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ECONOMY, GAMES, accessCodeHash, arrivalSlip, blackjackValue, borrowDebt, bumpCounters, cumulativeCosts, deductionFor, diceHand,
-  generateAccessCode, lastTrain, normalizeAccessCode, normalizeEconomy, replayWager, skillCost, stepSeed, usedThisWeek, wageFor, wageSlip,
+  generateAccessCode, lastTrain, normalizeAccessCode, normalizeEconomy, replayWager, skillCost, stepSeed, usedInPeriod, usesLeft, dayIndexAt, periodStartMs, limitReachedText, wageFor, wageSlip,
   weekIndexAt, weekStartMs, XorShift32, DISTRICTS, WORK_TEMPLATES, makeMathQuestions, makeMemoryRounds, makeSortQueue, makeTimingRounds,
   timingAccuracy, needleAt, fill, oddEven, highLow, oldMaid, JOKER,
 } from "../src/index.ts";
@@ -13,12 +13,20 @@ describe("week index (KST Monday 00:00)", () => {
     expect(weekStartMs(weekIndexAt(monday))).toBe(monday);
     expect(weekIndexAt(monday + 6 * 86_400_000 + 86_399_999)).toBe(weekIndexAt(monday));
   });
-  it("treats a stale week as unused and resets both counters", () => {
+  it("daily periods roll over at 00:00 KST", () => {
+    const midnight = Date.UTC(2026, 9, 13, 15, 0, 0); // 2026-10-14 00:00 KST
+    expect(dayIndexAt(midnight) - dayIndexAt(midnight - 1)).toBe(1);
+    expect(periodStartMs(dayIndexAt(midnight), "day")).toBe(midnight);
+    expect(periodStartMs(weekIndexAt(midnight), "week")).toBe(weekStartMs(weekIndexAt(midnight)));
+  });
+  it("treats a stale period as unused and resets both counters", () => {
     const now = Date.UTC(2026, 9, 14);
-    const counters = { weekIndex: weekIndexAt(now) - 1, workUsed: 10, gambleUsed: 30 };
-    expect(usedThisWeek(counters, "work", now)).toBe(0);
-    expect(bumpCounters(counters, "gamble", weekIndexAt(now))).toEqual({ weekIndex: weekIndexAt(now), workUsed: 0, gambleUsed: 1 });
-    expect(bumpCounters({ ...counters, weekIndex: weekIndexAt(now) }, "work", weekIndexAt(now))).toMatchObject({ workUsed: 11, gambleUsed: 30 });
+    const counters = { periodIndex: dayIndexAt(now) - 1, workUsed: 10, gambleUsed: 30 };
+    expect(usedInPeriod(counters, "work", now, "day")).toBe(0);
+    expect(bumpCounters(counters, "gamble", dayIndexAt(now))).toEqual({ periodIndex: dayIndexAt(now), workUsed: 0, gambleUsed: 1 });
+    expect(bumpCounters({ ...counters, periodIndex: dayIndexAt(now) }, "work", dayIndexAt(now))).toMatchObject({ workUsed: 11, gambleUsed: 30 });
+    expect(usesLeft({ ...counters, periodIndex: dayIndexAt(now), workUsed: 4 }, DEFAULT_ECONOMY, "work", now)).toBe(6);
+    expect(limitReachedText(DEFAULT_ECONOMY, "gamble")).toContain("오늘");
   });
 });
 
@@ -49,8 +57,11 @@ describe("economy", () => {
     expect(borrowDebt(400, 5_000)).toBe(600);
   });
   it("normalises partial config and recomputes derived fields", () => {
-    const config = normalizeEconomy({ work: { weeklyLimit: 12 }, skill: { costs: [0, 5, 7] }, gambling: { games: { "odd-even": { house: { enabled: false, params: { payout: 1.8 } } } } } });
-    expect(config.work.weeklyLimit).toBe(12);
+    const config = normalizeEconomy({ work: { weeklyLimit: 12 }, skill: { costs: [0, 5, 7] }, gambling: { limit: 40, games: { "odd-even": { house: { enabled: false, params: { payout: 1.8 } } } } } });
+    expect(config.work.limit).toBe(12); // legacy key still read
+    expect(config.gambling.limit).toBe(40);
+    expect(config.limitPeriod).toBe("day");
+    expect(normalizeEconomy({ limitPeriod: "week" }).limitPeriod).toBe("week");
     expect(config.work.wageMax).toBe(250);
     expect(config.skill.cumulative).toEqual([0, 5, 12]);
     expect(config.gambling.games["odd-even"].house).toEqual({ enabled: false, params: { payout: 1.8 }, maxMultiplier: 1.8 });

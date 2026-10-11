@@ -1,4 +1,6 @@
 import { GAME_IDS, GAMES, VENUES, isRecord, numberOr, type GameId, type Venue } from "./games/index.ts";
+import { periodWords, usedInPeriod, type LimitPeriod, type UsageCounters } from "./week.ts";
+import { fill, TEXT } from "./content/text.ts";
 
 export interface GameVenueConfig {
   enabled: boolean;
@@ -12,11 +14,14 @@ export interface GameVenueConfig {
  * Always pass through `finalizeEconomy` before saving.
  */
 export interface EconomyConfig {
+  /** How often the work/gamble counters refill (00:00 KST). */
+  limitPeriod: LimitPeriod;
   welcome: { loan: number; debt: number; gateFee: number };
   borrow: { enabled: boolean; feeBps: number };
-  work: { weeklyLimit: number; baseWage: number; wageMin: number; wageMax: number; wageStep: number };
+  work: { limit: number; baseWage: number; wageMin: number; wageMax: number; wageStep: number };
   gambling: {
-    weeklyLimit: number;
+    /** Plays per limit period. */
+    limit: number;
     minBet: number;
     alleyMaxBet: number;
     houseMaxBet: number;
@@ -37,10 +42,11 @@ function defaultGames(): EconomyConfig["gambling"]["games"] {
 }
 
 export const DEFAULT_ECONOMY: EconomyConfig = {
+  limitPeriod: "day",
   welcome: { loan: 1_000, debt: 1_500, gateFee: 100 },
   borrow: { enabled: true, feeBps: 5_000 },
-  work: { weeklyLimit: 10, baseWage: 200, wageMin: 150, wageMax: 250, wageStep: 10 },
-  gambling: { weeklyLimit: 30, minBet: 10, alleyMaxBet: 200, houseMaxBet: 2_000, houseOpen: false, games: defaultGames() },
+  work: { limit: 10, baseWage: 200, wageMin: 150, wageMax: 250, wageStep: 10 },
+  gambling: { limit: 30, minBet: 10, alleyMaxBet: 200, houseMaxBet: 2_000, houseOpen: false, games: defaultGames() },
   skill: { costs: [...DEFAULT_SKILL_COSTS], cumulative: cumulativeCosts(DEFAULT_SKILL_COSTS) },
   vaultInitial: 1_000_000,
 };
@@ -74,14 +80,15 @@ export function normalizeEconomy(raw: unknown): EconomyConfig {
   })) as EconomyConfig["gambling"]["games"];
   const costs = Array.isArray(skill.costs) && skill.costs.length >= 2 && skill.costs.every((cost) => Number.isSafeInteger(cost) && (cost as number) >= 0) ? (skill.costs as number[]) : [...d.skill.costs];
   return {
+    limitPeriod: source.limitPeriod === "week" ? "week" : source.limitPeriod === "day" ? "day" : d.limitPeriod,
     welcome: { loan: int(welcome.loan, d.welcome.loan), debt: int(welcome.debt, d.welcome.debt), gateFee: int(welcome.gateFee, d.welcome.gateFee) },
     borrow: { enabled: typeof borrow.enabled === "boolean" ? borrow.enabled : d.borrow.enabled, feeBps: int(borrow.feeBps, d.borrow.feeBps, 0, 100_000) },
     work: {
-      weeklyLimit: int(work.weeklyLimit, d.work.weeklyLimit, 0, 1_000), baseWage: int(work.baseWage, d.work.baseWage),
+      limit: int(work.limit ?? work.weeklyLimit, d.work.limit, 0, 1_000), baseWage: int(work.baseWage, d.work.baseWage),
       wageMin: int(work.wageMin, d.work.wageMin), wageMax: int(work.wageMax, d.work.wageMax), wageStep: int(work.wageStep, d.work.wageStep, 1),
     },
     gambling: {
-      weeklyLimit: int(gambling.weeklyLimit, d.gambling.weeklyLimit, 0, 10_000), minBet: int(gambling.minBet, d.gambling.minBet, 1),
+      limit: int(gambling.limit ?? gambling.weeklyLimit, d.gambling.limit, 0, 10_000), minBet: int(gambling.minBet, d.gambling.minBet, 1),
       alleyMaxBet: int(gambling.alleyMaxBet, d.gambling.alleyMaxBet, 1), houseMaxBet: int(gambling.houseMaxBet, d.gambling.houseMaxBet, 1),
       houseOpen: typeof gambling.houseOpen === "boolean" ? gambling.houseOpen : d.gambling.houseOpen, games,
     },
@@ -118,4 +125,14 @@ export function normalizeNotify(raw: unknown): NotifyConfig {
     bigGamble: int(source.bigGamble, DEFAULT_NOTIFY.bigGamble),
     relayUrl: typeof source.relayUrl === "string" ? source.relayUrl : "",
   };
+}
+
+/** Work shifts or table plays still available in the current period. */
+export function usesLeft(counters: UsageCounters, config: EconomyConfig, kind: "work" | "gamble", nowMs: number): number {
+  const limit = kind === "work" ? config.work.limit : config.gambling.limit;
+  return Math.max(0, limit - usedInPeriod(counters, kind, nowMs, config.limitPeriod));
+}
+
+export function limitReachedText(config: EconomyConfig, kind: "work" | "gamble"): string {
+  return fill(kind === "work" ? TEXT.work.limitReached : TEXT.gamble.limitReached, periodWords(config.limitPeriod));
 }

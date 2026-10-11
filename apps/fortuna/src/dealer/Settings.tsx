@@ -53,7 +53,15 @@ function EconomyEditor({ config }: { config: EconomyConfig }) {
       </SectionTitle>
       <div className="grid gap-5 lg:grid-cols-2">
         <fieldset className="space-y-2">
-          <legend className="deco-caps mb-1">도착</legend>
+          <legend className="deco-caps mb-1">횟수 초기화 주기</legend>
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="횟수 초기화 주기">
+            {(["day", "week"] as const).map((period) => (
+              <button key={period} type="button" role="radio" aria-checked={draft.limitPeriod === period} className={cx("btn btn-sm", draft.limitPeriod === period ? "btn-gold" : "btn-dark")} onClick={() => update((next) => { next.limitPeriod = period; })}>
+                {period === "day" ? "매일 0시" : "매주 월요일 0시"}
+              </button>
+            ))}
+          </div>
+          <legend className="deco-caps mb-1 pt-2">도착</legend>
           <div className="grid grid-cols-3 gap-2">
             <NumberField label="환영 봉투" value={draft.welcome.loan} onChange={(value) => update((next) => { next.welcome.loan = value; })} />
             <NumberField label="기록할 빚" value={draft.welcome.debt} onChange={(value) => update((next) => { next.welcome.debt = value; })} />
@@ -64,7 +72,7 @@ function EconomyEditor({ config }: { config: EconomyConfig }) {
           <NumberField label="대출 수수료" value={draft.borrow.feeBps / 100} onChange={(value) => update((next) => { next.borrow.feeBps = Math.round(value * 100); })} suffix="%" />
           <legend className="deco-caps mb-1 pt-2">일</legend>
           <div className="grid grid-cols-2 gap-2">
-            <NumberField label="주간 횟수" value={draft.work.weeklyLimit} onChange={(value) => update((next) => { next.work.weeklyLimit = value; })} />
+            <NumberField label="일 횟수 (주기당)" value={draft.work.limit} onChange={(value) => update((next) => { next.work.limit = value; })} />
             <NumberField label="기본 임금 (표시용)" value={draft.work.baseWage} onChange={(value) => update((next) => { next.work.baseWage = value; })} />
             <NumberField label="최저 임금 (성과 0%)" value={draft.work.wageMin} onChange={(value) => update((next) => { next.work.wageMin = value; })} />
             <NumberField label="최고 임금 (성과 100%)" value={draft.work.wageMax} onChange={(value) => update((next) => { next.work.wageMax = value; })} />
@@ -76,7 +84,7 @@ function EconomyEditor({ config }: { config: EconomyConfig }) {
           <legend className="deco-caps mb-1">도박</legend>
           <Toggle label="하우스 개방" hint="닫혀 있어도 입구는 보입니다. 열면 디스코드에 알립니다." checked={draft.gambling.houseOpen} onChange={(value) => update((next) => { next.gambling.houseOpen = value; })} />
           <div className="grid grid-cols-2 gap-2">
-            <NumberField label="주간 판 수" value={draft.gambling.weeklyLimit} onChange={(value) => update((next) => { next.gambling.weeklyLimit = value; })} />
+            <NumberField label="판 수 (주기당)" value={draft.gambling.limit} onChange={(value) => update((next) => { next.gambling.limit = value; })} />
             <NumberField label="최소 판돈" value={draft.gambling.minBet} onChange={(value) => update((next) => { next.gambling.minBet = value; })} />
             <NumberField label="뒷골목 1판 최대" value={draft.gambling.alleyMaxBet} onChange={(value) => update((next) => { next.gambling.alleyMaxBet = value; })} />
             <NumberField label="하우스 1판 최대" value={draft.gambling.houseMaxBet} onChange={(value) => update((next) => { next.gambling.houseMaxBet = value; })} />

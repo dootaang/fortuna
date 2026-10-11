@@ -1,5 +1,5 @@
 import { query, where } from "firebase/firestore";
-import { GAME_CONTENT, districtContent, usedThisWeek } from "@fortuna/core";
+import { GAME_CONTENT, districtContent, periodWords, usedInPeriod } from "@fortuna/core";
 import { refs } from "@fortuna/data";
 import { useLiveQuery } from "../session/live.ts";
 import { Coins, Frame, Notice, Stat } from "../ui/kit.tsx";
@@ -27,7 +27,7 @@ export function Overview() {
           <Stat label="플레이어 코인 합계"><Coins value={totals.coins} /></Stat>
           <Stat label="빚 합계" tone="ruby"><span className="num">{totals.debt.toLocaleString("ko-KR")}</span></Stat>
         </div>
-        <p className="mt-2 text-center text-xs text-mist">하우스 {config.gambling.houseOpen ? "영업 중" : "닫힘"} · 주간 한도 일 {config.work.weeklyLimit}회 / 도박 {config.gambling.weeklyLimit}판</p>
+        <p className="mt-2 text-center text-xs text-mist">하우스 {config.gambling.houseOpen ? "영업 중" : "닫힘"} · 한도({periodWords(config.limitPeriod).now} 기준) 일 {config.work.limit}회 / 도박 {config.gambling.limit}판</p>
       </Frame>
 
       {filledFunds.status === "ready" && filledFunds.data.length > 0 && (
@@ -51,8 +51,8 @@ export function Overview() {
                     <td>{districtContent(row.data.districtId).name}</td>
                     <td className="text-right"><Coins value={wallet?.balance ?? 0} /></td>
                     <td className="text-right num">{(wallet?.debt ?? 0).toLocaleString("ko-KR")}</td>
-                    <td className="text-center num">{wallet ? usedThisWeek(wallet, "work", now) : 0}/{config.work.weeklyLimit}</td>
-                    <td className="text-center num">{wallet ? usedThisWeek(wallet, "gamble", now) : 0}/{config.gambling.weeklyLimit}</td>
+                    <td className="text-center num">{wallet ? usedInPeriod(wallet, "work", now, config.limitPeriod) : 0}/{config.work.limit}</td>
+                    <td className="text-center num">{wallet ? usedInPeriod(wallet, "gamble", now, config.limitPeriod) : 0}/{config.gambling.limit}</td>
                     <td className="text-xs text-mist">{(items.get(row.id) ?? []).map((item) => `${item.name}×${item.quantity}`).join(", ") || "—"}</td>
                   </tr>
                 );

@@ -40,7 +40,8 @@ export interface Wallet<T = TimestampLike> {
   /** Sequence of the latest ledger entry. */
   seq: number;
   arrived: boolean;
-  weekIndex: number;
+  /** Day or week index (config.limitPeriod) the two counters belong to. */
+  periodIndex: number;
   workUsed: number;
   gambleUsed: number;
   openWager: OpenWager<T> | null;
@@ -94,5 +95,5 @@ export const LEDGER_GROUPS: Readonly<Record<string, readonly LedgerType[]>> = {
 };
 
 export function emptyWallet(playerId: string): Wallet<never> {
-  return { playerId, balance: 0, debt: 0, seq: 0, arrived: false, weekIndex: 0, workUsed: 0, gambleUsed: 0, openWager: null };
+  return { playerId, balance: 0, debt: 0, seq: 0, arrived: false, periodIndex: 0, workUsed: 0, gambleUsed: 0, openWager: null };
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
-import { GAMES, GAME_CONTENT, GAME_IDS, TEXT, replayWager, usedThisWeek, wagerTrace, type GameId, type Venue } from "@fortuna/core";
+import { GAMES, GAME_CONTENT, GAME_IDS, TEXT, limitReachedText, periodWords, replayWager, usesLeft, wagerTrace, type GameId, type Venue } from "@fortuna/core";
 import { friendlyError, openBet, sealStep, settleBet } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { Coins, Frame, Notice, PageTitle, cx, useAction, useToast } from "../ui/kit.tsx";
@@ -168,9 +168,9 @@ function BetPanel({ game, venue, enabled }: { game: GameId; venue: Venue; enable
   const max = venue === "house" ? config.gambling.houseMaxBet : config.gambling.alleyMaxBet, min = config.gambling.minBet;
   const presets = [...new Set([min, Math.round(max / 20), Math.round(max / 10), Math.round(max / 4), Math.round(max / 2), max].filter((value) => value >= min))];
   const [bet, setBet] = useState(Math.min(max, Math.max(min, Math.round(max / 4))));
-  const left = config.gambling.weeklyLimit - usedThisWeek(wallet, "gamble", session.clock.now());
+  const left = usesLeft(wallet, config, "gamble", session.clock.now());
   const houseClosed = venue === "house" && !config.gambling.houseOpen;
-  const blocked = houseClosed ? TEXT.lobby.houseLocked : !enabled ? "이 테이블은 지금 닫혀 있습니다." : left <= 0 ? TEXT.gamble.limitReached : wallet.balance < min ? "판돈이 부족합니다." : null;
+  const blocked = houseClosed ? TEXT.lobby.houseLocked : !enabled ? "이 테이블은 지금 닫혀 있습니다." : left <= 0 ? limitReachedText(config, "gamble") : wallet.balance < min ? "판돈이 부족합니다." : null;
 
   return (
     <Frame>
@@ -185,7 +185,7 @@ function BetPanel({ game, venue, enabled }: { game: GameId; venue: Venue; enable
           <button key={value} type="button" className={cx("btn btn-sm", value === bet ? "btn-gold" : "btn-dark")} disabled={value > wallet.balance} onClick={() => { cue("chip"); setBet(value); }}>{value.toLocaleString("ko-KR")}</button>
         ))}
       </div>
-      <p className="mt-3 text-center text-xs text-mist">이번 주 남은 판 {Math.max(0, left)} · 잔액 <Coins value={wallet.balance} /></p>
+      <p className="mt-3 text-center text-xs text-mist">{periodWords(config.limitPeriod).now} 남은 판 {left} · 잔액 <Coins value={wallet.balance} /></p>
       {blocked ? <div className="mt-4"><Notice>{blocked}</Notice></div> : (
         <button type="button" className="btn btn-gold mt-4 w-full" disabled={busy || bet > wallet.balance} onClick={() => { cue("chip"); void run(() => openBet(session, game, venue, bet)); }}>
           {busy ? "판을 펴는 중…" : TEXT.gamble.open}

@@ -1,12 +1,12 @@
 import { Link } from "react-router";
-import { GAME_CONTENT, GAME_IDS, TEXT, usedThisWeek, type Venue } from "@fortuna/core";
+import { GAME_CONTENT, GAME_IDS, TEXT, limitReachedText, periodWords, usesLeft, type Venue } from "@fortuna/core";
 import { usePlayer } from "../session/player.tsx";
 import { Frame, Notice, PageTitle, cx } from "../ui/kit.tsx";
 
 export function VenueList({ venue }: { venue: Venue }) {
   const { config, wallet, session } = usePlayer();
   const house = venue === "house", locked = house && !config.gambling.houseOpen;
-  const left = Math.max(0, config.gambling.weeklyLimit - usedThisWeek(wallet, "gamble", session.clock.now()));
+  const left = usesLeft(wallet, config, "gamble", session.clock.now());
   const maxBet = house ? config.gambling.houseMaxBet : config.gambling.alleyMaxBet;
   const games = [...GAME_IDS].filter((id) => config.gambling.games[id][venue].enabled).sort((a, b) => GAME_CONTENT[a].tier - GAME_CONTENT[b].tier);
 
@@ -28,11 +28,11 @@ export function VenueList({ venue }: { venue: Venue }) {
           <Frame className="mb-4">
             <p className="flex flex-wrap justify-between gap-2 text-sm">
               <span>1판 최대 <b className="num text-gold-200">{maxBet.toLocaleString("ko-KR")}</b></span>
-              <span>이번 주 남은 판 <b className="num text-gold-200">{left}</b> / {config.gambling.weeklyLimit}</span>
+              <span>{periodWords(config.limitPeriod).now} 남은 판 <b className="num text-gold-200">{left}</b> / {config.gambling.limit}</span>
             </p>
             <p className="mt-1 text-xs text-mist">{house ? "하우스 엣지 약 5% · 하우스 손익은 지배인 금고에 반영" : "기대값은 거의 본전"}</p>
           </Frame>
-          {left === 0 && <div className="mb-4"><Notice>{TEXT.gamble.limitReached}</Notice></div>}
+          {left === 0 && <div className="mb-4"><Notice>{limitReachedText(config, "gamble")}</Notice></div>}
           <div className="grid gap-3 sm:grid-cols-2">
             {games.map((id) => {
               const info = GAME_CONTENT[id];

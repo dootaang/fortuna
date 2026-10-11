@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
-import { TEXT, WORK_TEMPLATES, randomSeed, usedThisWeek, wageFor, type WorkTemplate } from "@fortuna/core";
+import { TEXT, WORK_TEMPLATES, limitReachedText, periodWords, randomSeed, usesLeft, wageFor, type WorkTemplate } from "@fortuna/core";
 import { submitWork, type WorkResult } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { Coins, Frame, Notice, Ornament, PageTitle, useAction } from "../ui/kit.tsx";
@@ -26,7 +26,7 @@ export default function WorkShift() {
   const valid = WORK_TEMPLATES.includes(template as WorkTemplate);
   const kind = (valid ? template : "sort") as WorkTemplate;
   const skin = content.work[kind];
-  const left = Math.max(0, config.work.weeklyLimit - usedThisWeek(wallet, "work", session.clock.now()));
+  const left = usesLeft(wallet, config, "work", session.clock.now());
 
   const finish = useMemo(() => async (performance: number) => {
     const result = await run(() => submitWork(session, kind, performance));
@@ -66,7 +66,7 @@ export default function WorkShift() {
           <p className="text-center text-sm text-mist">성과 {Math.round(phase.performance * 100)}%{result.deduction === 0 ? ` · ${TEXT.work.liberated}` : ""}</p>
           <div className="mt-5 grid grid-cols-2 gap-2">
             <Link to="/work" className="btn btn-ghost">일터로</Link>
-            <button type="button" className="btn btn-gold" disabled={left === 0} onClick={() => setPhase({ name: "intro" })}>{left === 0 ? "이번 주 끝" : "한 번 더"}</button>
+            <button type="button" className="btn btn-gold" disabled={left === 0} onClick={() => setPhase({ name: "intro" })}>{left === 0 ? `${periodWords(config.limitPeriod).now} 끝` : "한 번 더"}</button>
           </div>
         </Frame>
       </div>
@@ -79,7 +79,7 @@ export default function WorkShift() {
       <Frame>
         <p>{RULES[kind]}</p>
         <p className="mt-2 text-sm text-mist">임금은 성과에 따라 <Coins value={wageFor(0, config.work)} />~<Coins value={wageFor(1, config.work)} /> 사이에서 정해지고, 지배인 몫이 먼저 떼입니다.</p>
-        {left === 0 ? <div className="mt-4"><Notice>{TEXT.work.limitReached}</Notice></div> : (
+        {left === 0 ? <div className="mt-4"><Notice>{limitReachedText(config, "work")}</Notice></div> : (
           <button type="button" className="btn btn-gold mt-5 w-full" onClick={() => setPhase({ name: "play", seed: randomSeed() })}>근무 시작 (남은 {left}회)</button>
         )}
       </Frame>
