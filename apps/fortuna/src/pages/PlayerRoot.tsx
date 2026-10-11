@@ -7,6 +7,7 @@ import { useAuthUser } from "../session/auth.ts";
 import { PlayerProvider, usePlayer, usePlayerBinding } from "../session/player.tsx";
 import { Frame, Splash, cx } from "../ui/kit.tsx";
 import { Counter } from "../fx/Counter.tsx";
+import { FxSettingsButton } from "../fx/FxSettings.tsx";
 import { Gate, type GateState } from "./Gate.tsx";
 import { Arrival } from "./Arrival.tsx";
 
@@ -62,10 +63,13 @@ function PlayerShell() {
             <p className="deco-caps truncate text-[0.6rem]">Fortuna Terminus</p>
             <p className="deco-title truncate text-base leading-tight">{player.name}</p>
           </Link>
+          <div className="flex shrink-0 items-center gap-2">
           <Link to="/wallet" className="flex shrink-0 items-center gap-2" aria-label="지갑 보기">
             <span className="chip chip-gold"><span className="coin"><Counter value={wallet.balance} /></span></span>
             {wallet.debt > 0 && <span className="chip chip-ruby">빚 <Counter value={wallet.debt} /></span>}
           </Link>
+          <FxSettingsButton />
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-xl px-4 pt-5">

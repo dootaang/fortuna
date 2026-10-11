@@ -233,6 +233,7 @@ input, select, textarea { min-width: 0; }
 .timer-urgent { animation: timer-urgent 500ms ease-in-out infinite; }
 @keyframes timer-urgent { 50% { opacity: .45; } }
 @keyframes slide-in-top { from { opacity: 0; transform: translateY(-24px) scale(.95); } to { opacity: 1; transform: none; } }
+@keyframes shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 .slide-in-top { animation: slide-in-top 240ms cubic-bezier(.2,.9,.3,1.2) both; }
 
 /* 화면 하단 내비게이션이 가리지 않게 */

@@ -26,6 +26,12 @@ test("arrival, work, gamble, shop and wallet on a phone", async ({ page }) => {
   await expect(page.locator("header").getByText("900")).toBeVisible();
   await page.screenshot({ path: "test-results/shots/03-lobby.png", fullPage: true, animations: "disabled" });
 
+  // Effects settings open above the sticky header and close again.
+  await page.getByRole("button", { name: "연출 설정" }).click();
+  await page.getByRole("dialog", { name: "연출 설정" }).getByText("연출 빠르게").click();
+  await page.getByRole("button", { name: "닫기" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
   // Work: the timing shift is the quickest to drive.
   await page.getByRole("link", { name: /일터/ }).first().click();
   await page.getByRole("link", { name: /약탕 불 조절/ }).click();
