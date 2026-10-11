@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { cx } from "../ui/kit.tsx";
 import { ms } from "./settings.ts";
+import { cue } from "./cues.ts";
 
 /** Cube rotation that puts each face toward the viewer (faces: front 1, back 6, right 2, left 5, top 3, bottom 4). */
 const FACE: Record<number, [number, number]> = { 1: [0, 0], 6: [0, 180], 2: [0, -90], 5: [0, 90], 3: [-90, 0], 4: [90, 0] };
@@ -41,6 +42,7 @@ export function Dice3D({ value, rolling: rollingProp = false, red, held, onClick
   // A little bounce as it lands (replayed per landing without remounting the cube mid-transition).
   useEffect(() => {
     if (landing === 0 || rolling) return;
+    cue("land");
     hop.current?.animate(
       [{ transform: "translateY(-26px)" }, { transform: "translateY(0)", offset: 0.55 }, { transform: "translateY(-7px)", offset: 0.72 }, { transform: "translateY(0)" }],
       { duration: ms(700), easing: "cubic-bezier(.3,.7,.4,1)" },

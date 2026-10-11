@@ -85,6 +85,7 @@ function Cup({ mode }: { mode: "rest" | "shake" | "lift" }) {
 
 function OddEvenView({ state, phase, action, busy, act }: ViewProps<OddEvenState>) {
   const rolling = phase === "rolling", revealed = state.done, settled = revealed && phase === "idle";
+  useOnRise(rolling, () => cue("shake"));
   const sum = (state.dice?.[0] ?? 0) + (state.dice?.[1] ?? 0);
   const pick = state.pick ?? (action === "odd" || action === "even" ? action : null);
   return (
@@ -297,6 +298,7 @@ function DicePokerView({ state, phase, action, busy, act }: ViewProps<DicePokerS
   const toggle = (index: number) => { cue("tap"); setHold((mask) => mask.split("").map((bit, slot) => (slot === index ? (bit === "1" ? "0" : "1") : bit)).join("")); };
   const rolling = phase === "rolling", landing = phase === "landing", settled = phase === "idle";
   const sealedHold = action?.startsWith("hold:") ? action.slice(5) : hold;
+  useOnRise(rolling, () => cue("dice"));
   // Dealer rolls after the player's dice settle.
   const [dealer, setDealer] = useState<"hidden" | "rolling" | "shown">(state.done && settled ? "shown" : "hidden");
   useOnRise(landing && state.done, () => {

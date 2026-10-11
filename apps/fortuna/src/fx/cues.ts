@@ -14,7 +14,13 @@ let player: ((cue: Cue, intensity: number) => void) | null = null;
 /** Installed by the sound module once loaded. */
 export function setCuePlayer(play: (cue: Cue, intensity: number) => void): void { player = play; }
 
+const lastPlayed = new Map<Cue, number>();
+
 export function cue(name: Cue, intensity = 0): void {
+  // Several dice landing together should sound like one thud, not a stack.
+  const now = performance.now();
+  if (now - (lastPlayed.get(name) ?? -Infinity) < 60) return;
+  lastPlayed.set(name, now);
   const pattern = VIBRATION[name];
   if (pattern !== undefined) haptic(pattern);
   player?.(name, intensity);

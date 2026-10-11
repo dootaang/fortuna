@@ -22,6 +22,8 @@ const again = (page: Page) => page.getByRole("button", { name: "한 판 더" });
 
 test("the remaining tables and work shifts play to the end", async ({ page }) => {
   test.setTimeout(240_000);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await arriveWithFreshPlayer(page);
 
   await open(page, "alley", "roulette");
@@ -78,4 +80,5 @@ test("the remaining tables and work shifts play to the end", async ({ page }) =>
     await page.waitForTimeout(250);
   }
   await expect(page.getByText("임금 명세서")).toBeVisible({ timeout: 15_000 });
+  expect(errors).toEqual([]);
 });

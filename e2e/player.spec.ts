@@ -12,6 +12,8 @@ async function enterCity(page: Page) {
 }
 
 test("arrival, work, gamble, shop and wallet on a phone", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await enterCity(page);
   await expect(page.getByText("지배인의 편지")).toBeVisible();
   await page.screenshot({ path: "test-results/shots/01-letter.png", animations: "disabled" });
@@ -90,6 +92,7 @@ test("arrival, work, gamble, shop and wallet on a phone", async ({ page }) => {
   await expect(page.getByText("특기 결제").first()).toBeVisible();
   await expect(page.getByText(/쾌검 4→5점/)).toBeVisible({ timeout: 15_000 });
   await page.screenshot({ path: "test-results/shots/09-wallet.png", fullPage: true, animations: "disabled" });
+  expect(errors).toEqual([]);
 });
 
 test("a second device joins with the same code", async ({ browser }) => {

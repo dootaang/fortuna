@@ -6,6 +6,9 @@ import { ToastProvider } from "./ui/kit.tsx";
 import { PlayerRoot } from "./pages/PlayerRoot.tsx";
 import { Lobby } from "./pages/Lobby.tsx";
 import { RouteError } from "./pages/RouteError.tsx";
+import { installSound } from "./fx/sound.ts";
+
+installSound();
 
 const page = (load: () => Promise<{ default: React.ComponentType }>) => async () => ({ Component: (await load()).default });
 
