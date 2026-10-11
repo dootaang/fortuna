@@ -5,7 +5,8 @@ import { TEXT } from "@fortuna/core";
 import { auth } from "../firebase.ts";
 import { useAuthUser } from "../session/auth.ts";
 import { PlayerProvider, usePlayer, usePlayerBinding } from "../session/player.tsx";
-import { Coins, Frame, Splash, cx } from "../ui/kit.tsx";
+import { Frame, Splash, cx } from "../ui/kit.tsx";
+import { Counter } from "../fx/Counter.tsx";
 import { Gate, type GateState } from "./Gate.tsx";
 import { Arrival } from "./Arrival.tsx";
 
@@ -62,8 +63,8 @@ function PlayerShell() {
             <p className="deco-title truncate text-base leading-tight">{player.name}</p>
           </Link>
           <Link to="/wallet" className="flex shrink-0 items-center gap-2" aria-label="지갑 보기">
-            <span className="chip chip-gold"><Coins value={wallet.balance} /></span>
-            {wallet.debt > 0 && <span className="chip chip-ruby">빚 <span className="num">{wallet.debt.toLocaleString("ko-KR")}</span></span>}
+            <span className="chip chip-gold"><span className="coin"><Counter value={wallet.balance} /></span></span>
+            {wallet.debt > 0 && <span className="chip chip-ruby">빚 <Counter value={wallet.debt} /></span>}
           </Link>
         </div>
       </header>

@@ -7,7 +7,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
-  use: { baseURL: "http://127.0.0.1:5174", trace: "retain-on-failure", screenshot: "only-on-failure" },
+  // Reduced motion keeps the staged reveals short; behaviour is otherwise identical.
+  use: { baseURL: "http://127.0.0.1:5174", trace: "retain-on-failure", screenshot: "only-on-failure", contextOptions: { reducedMotion: "reduce" } },
   projects: [
     { name: "phone", use: { ...devices["Pixel 7"] }, grepInvert: /dealer/ },
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 860 } }, grep: /dealer/ },

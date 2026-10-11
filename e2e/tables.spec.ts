@@ -30,22 +30,22 @@ test("the remaining tables and work shifts play to the end", async ({ page }) =>
   await page.screenshot({ path: "test-results/shots/20-roulette.png", animations: "disabled" });
 
   await open(page, "alley", "dice-poker");
-  await expect(page.getByRole("button", { name: "딜러의 추천" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "추천대로" })).toBeVisible();
   await page.screenshot({ path: "test-results/shots/21-dice-poker.png", animations: "disabled" });
   await page.getByRole("button", { name: /다시 굴리기|이대로 승부/ }).click();
   await expect(again(page)).toBeVisible({ timeout: 15_000 });
 
   await open(page, "alley", "draw-poker");
-  await expect(page.getByRole("button", { name: "딜러의 추천" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "추천대로" })).toBeVisible();
   await page.screenshot({ path: "test-results/shots/22-draw-poker.png", animations: "disabled" });
   await page.getByRole("button", { name: /교환|이대로 승부/ }).click();
   await expect(again(page)).toBeVisible({ timeout: 15_000 });
 
   await open(page, "alley", "old-maid");
-  for (let turn = 0; turn < 30 && !(await again(page).isVisible()); turn += 1) {
+  for (const until = Date.now() + 90_000; Date.now() < until && !(await again(page).isVisible());) {
     const pick = page.getByRole("button", { name: /딜러의 1번째 카드 뽑기/ });
-    if (await pick.isEnabled().catch(() => false)) await pick.click();
-    await page.waitForTimeout(400);
+    if (await pick.isEnabled().catch(() => false)) await pick.click().catch(() => undefined);
+    await page.waitForTimeout(300);
   }
   await expect(again(page)).toBeVisible({ timeout: 15_000 });
   await page.screenshot({ path: "test-results/shots/23-old-maid.png", animations: "disabled" });

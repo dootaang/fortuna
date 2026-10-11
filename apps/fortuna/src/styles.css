@@ -185,5 +185,55 @@ input, select, textarea { min-width: 0; }
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 }
 
+/* ── 3D 주사위 ── */
+.die3d { width: var(--die, 3.1rem); height: var(--die, 3.1rem); perspective: 420px; display: inline-block; }
+.die3d-cube { display: block; position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform var(--land, 700ms) cubic-bezier(.2,.85,.25,1.12); }
+.die3d-cube.tumbling { animation: die3d-tumble 520ms linear infinite; }
+.die3d-face {
+  position: absolute; inset: 0; border-radius: 18%; padding: 16%; display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+  background: linear-gradient(150deg, #fffaf0, #e6dabb); box-shadow: inset 0 0 0 1px #0002, inset 0 -3px 6px #0002; backface-visibility: hidden;
+}
+.die3d-face i { width: 62%; height: 62%; border-radius: 50%; background: #1b1b1b; place-self: center; }
+.die3d.red .die3d-face i { background: #b3261e; }
+.die3d.held { filter: drop-shadow(0 0 6px var(--color-gold-400)); }
+.die3d.held .die3d-face { box-shadow: inset 0 0 0 2px var(--color-gold-400), inset 0 -3px 6px #0002; }
+.die3d-face.f1 { transform: translateZ(calc(var(--die, 3.1rem) / 2)); }
+.die3d-face.f6 { transform: rotateY(180deg) translateZ(calc(var(--die, 3.1rem) / 2)); }
+.die3d-face.f2 { transform: rotateY(90deg) translateZ(calc(var(--die, 3.1rem) / 2)); }
+.die3d-face.f5 { transform: rotateY(-90deg) translateZ(calc(var(--die, 3.1rem) / 2)); }
+.die3d-face.f3 { transform: rotateX(90deg) translateZ(calc(var(--die, 3.1rem) / 2)); }
+.die3d-face.f4 { transform: rotateX(-90deg) translateZ(calc(var(--die, 3.1rem) / 2)); }
+@keyframes die3d-tumble { from { transform: rotateX(0) rotateY(0) rotateZ(0); } to { transform: rotateX(720deg) rotateY(360deg) rotateZ(180deg); } }
+
+/* ── 뒤집히는 카드 ── */
+.flip { perspective: 800px; display: inline-block; }
+.flip-inner { position: relative; transform-style: preserve-3d; transition: transform 420ms cubic-bezier(.3,.7,.3,1.1); }
+.flip-inner.back { transform: rotateY(180deg); }
+.flip-inner.peek { transform: rotateY(180deg) rotateX(-24deg) rotateZ(-5deg) translateY(-6px); transition-duration: 380ms; }
+.flip-face { backface-visibility: hidden; }
+.flip-face.rear { position: absolute; inset: 0; transform: rotateY(180deg); }
+.flip .playing-card { animation: none; }
+.deck-wobble { animation: deck-wobble 600ms ease-in-out infinite; }
+@keyframes deck-wobble { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-4px) rotate(-2deg); } }
+
+/* ── 홀짝 컵 ── */
+.cup-shake { animation: cup-shake 260ms ease-in-out infinite; transform-origin: 50% 90%; }
+@keyframes cup-shake { 0%, 100% { transform: rotate(0) translateX(0); } 25% { transform: rotate(-11deg) translateX(-6px); } 75% { transform: rotate(11deg) translateX(6px); } }
+.cup-lift { animation: cup-lift 520ms cubic-bezier(.4,.1,.3,1) both; }
+@keyframes cup-lift { to { transform: translateY(-130%) rotate(-8deg); opacity: 0; } }
+
+/* ── 공통 동작 ── */
+.punch { animation: punch 260ms cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes punch { 0% { transform: scale(.88); } 60% { transform: scale(1.07); } 100% { transform: scale(1); } }
+.float-up { animation: float-up 700ms ease-out both; pointer-events: none; }
+@keyframes float-up { 0% { opacity: 0; transform: translate(-50%, 6px) scale(.8); } 20% { opacity: 1; transform: translate(-50%, -4px) scale(1.1); } 100% { opacity: 0; transform: translate(-50%, -36px) scale(1); } }
+.danger-pulse { animation: danger-pulse 900ms ease-in-out infinite; }
+@keyframes danger-pulse { 0%, 100% { box-shadow: inset 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 36px 0 #c4473a66; } }
+.dim-lose { filter: saturate(.35) brightness(.85); transition: filter 600ms ease; }
+.timer-urgent { animation: timer-urgent 500ms ease-in-out infinite; }
+@keyframes timer-urgent { 50% { opacity: .45; } }
+@keyframes slide-in-top { from { opacity: 0; transform: translateY(-24px) scale(.95); } to { opacity: 1; transform: none; } }
+.slide-in-top { animation: slide-in-top 240ms cubic-bezier(.2,.9,.3,1.2) both; }
+
 /* 화면 하단 내비게이션이 가리지 않게 */
 .with-nav { padding-bottom: calc(5.25rem + var(--safe-bottom)); }
