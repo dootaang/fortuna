@@ -52,7 +52,7 @@ service cloud.firestore {
     // 사용 횟수: 주기(하루/주)가 바뀌었으면 0부터 다시 센다.
     function countersOk(before, after, kind, limit, period) {
       let current = curPeriod(period);
-      let fresh = before.periodIndex != current;
+      let fresh = before.get('periodIndex', -1) != current;
       let workBase = fresh ? 0 : before.workUsed;
       let gambleBase = fresh ? 0 : before.gambleUsed;
       return after.periodIndex == current
@@ -241,7 +241,7 @@ service cloud.firestore {
         && isBpsFloor(d.deduction, d.gross, bps)
         && d.net == d.gross - d.deduction
         && e.delta == d.net && e.debtDelta == 0 && e.vaultDelta == d.deduction
-        && countersOk(before, after, 'work', work.limit, config.limitPeriod)
+        && countersOk(before, after, 'work', work.get('limit', work.get('weeklyLimit', 10)), config.get('limitPeriod', 'day'))
         && onlyChanged(before, after, ['balance', 'seq', 'periodIndex', 'workUsed', 'gambleUsed']);
     }
 
@@ -263,7 +263,7 @@ service cloud.firestore {
           'maxMultiplier': table.maxMultiplier, 'params': table.params,
           'openedAt': request.time, 'stepCount': 0, 'steps': {}
         }
-        && countersOk(before, after, 'gamble', gambling.limit, config.limitPeriod)
+        && countersOk(before, after, 'gamble', gambling.get('limit', gambling.get('weeklyLimit', 30)), config.get('limitPeriod', 'day'))
         && onlyChanged(before, after, ['balance', 'seq', 'periodIndex', 'workUsed', 'gambleUsed', 'openWager']);
     }
 
@@ -453,7 +453,11 @@ service cloud.firestore {
     function roomPath(id) { return /databases/$(database)/documents/pvpRooms/$(id); }
     function handPath(roomId, pid) { return /databases/$(database)/documents/pvpRooms/$(roomId)/hands/$(pid); }
     function dealPath(n, k) { return /databases/$(database)/documents/pvpDeals/$(string(n) + '_' + string(k)); }
-    function pvpConfig() { return get(configPath()).data.pvp; }
+    // 설정 문서가 PvP 추가 전 형식이어도 기본값으로 동작한다 (packages/core DEFAULT_ECONOMY.pvp와 같은 값).
+    function pvpConfig() {
+      return get(configPath()).data.get('pvp', {'enabled': true, 'minStake': 10, 'alleyMaxStake': 200, 'houseMaxStake': 2000, 'alleyRakeBps': 0, 'houseRakeBps': 500,
+        'offerSeconds': 12, 'pickSeconds': 20, 'resolveSeconds': 8, 'abandonMinutes': 30});
+    }
     function seatedIn(room) { return signedIn() && exists(bindingPath()) && myPid() in room.seats && isPlayer(myPid()); }
     function elapsed(ts, seconds) { return request.time > ts + duration.value(seconds, 's'); }
     function onlyAdded(before, after, key) {
@@ -497,13 +501,14 @@ service cloud.firestore {
     function roomCreateOk(roomId) {
       let r = request.resource.data;
       let config = get(configPath()).data;
+      let pvp = pvpConfig();
       let pid = myPid();
-      return signedIn() && isPlayer(pid) && config.pvp.enabled == true
+      return signedIn() && isPlayer(pid) && pvp.enabled == true
         && r.keys().hasOnly(['game', 'venue', 'stake', 'maxSeats', 'rakeBps', 'status', 'hostPid', 'createdAt', 'seats', 'seatCount', 'pot', 'op', 'lastLedger'])
         && r.game == 'old-maid' && r.op == 'create' && r.status == 'waiting'
         && (r.venue == 'alley' || (r.venue == 'house' && config.gambling.houseOpen == true))
-        && r.stake is int && r.stake >= config.pvp.minStake && r.stake <= (r.venue == 'house' ? config.pvp.houseMaxStake : config.pvp.alleyMaxStake)
-        && r.rakeBps == (r.venue == 'house' ? config.pvp.houseRakeBps : config.pvp.alleyRakeBps)
+        && r.stake is int && r.stake >= pvp.minStake && r.stake <= (r.venue == 'house' ? pvp.houseMaxStake : pvp.alleyMaxStake)
+        && r.rakeBps == (r.venue == 'house' ? pvp.houseRakeBps : pvp.alleyRakeBps)
         && r.maxSeats is int && r.maxSeats >= 2 && r.maxSeats <= 4
         && r.hostPid == pid && r.createdAt == request.time
         && r.seats.keys().hasOnly([pid]) && r.seats[pid] == {'name': get(playerPath(pid)).data.name, 'joinedAt': request.time}

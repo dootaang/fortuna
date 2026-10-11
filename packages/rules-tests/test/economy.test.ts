@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getDoc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch, increment } from "firebase/firestore";
 import { GAMES, normalizeEconomy, replayWager, wagerTrace, type GameId } from "@fortuna/core";
 import {
-  adminUseItem, arrive, buyItem, contributeFund, depositJoint, openBet, paySkill, refs, repayDebt, saveEconomy, saveFund, saveItem, sealStep, setDistrict,
+  adminUseItem, arrive, bootstrapCity, buyItem, economyNeedsUpgrade, contributeFund, depositJoint, openBet, paySkill, refs, repayDebt, saveEconomy, saveFund, saveItem, sealStep, setDistrict,
   settleBet, submitWork, useItem, withdrawJoint, type PlayerSession,
 } from "@fortuna/data";
 import { cityWithPlayer, closeAll, resetData, rootData, asRoot } from "./harness.ts";
@@ -69,6 +69,30 @@ describe("work", () => {
     await denied(forge(5_000, 2_500));
     await denied(forge(200, 0));
     await forge(200, 100); // the honest version of the same write goes through
+  });
+});
+
+describe("configs saved before later updates", () => {
+  it("work, bets and pvp still work with a pre-update config and wallet", async () => {
+    const { admin, player, pid } = await arrived();
+    // Recreate what an early deployment stored: weekly-named limits, no period/pvp/shop keys, wallets without periodIndex.
+    const current = normalizeEconomy((await getDoc(refs.config(admin.db))).data());
+    const { limitPeriod: _period, shopEnabled: _shop, pvp: _pvp, ...legacy } = JSON.parse(JSON.stringify(current));
+    legacy.work.weeklyLimit = legacy.work.limit; delete legacy.work.limit;
+    legacy.gambling.weeklyLimit = legacy.gambling.limit; delete legacy.gambling.limit;
+    await asRoot(async (root) => {
+      await root.doc("config/economy").set(legacy);
+      const { periodIndex: _index, ...wallet } = (await root.doc(`wallets/${pid}`).get()).data() as Record<string, unknown>;
+      await root.doc(`wallets/${pid}`).set({ ...wallet, weekIndex: 0 });
+    });
+    expect(economyNeedsUpgrade((await asRoot((root) => root.doc("config/economy").get())).data())).toBe(true);
+    await submitWork(player, "sort", 0.5);
+    await openBet(player, "odd-even", "alley", 50);
+    await sealStep(player, "odd");
+    await settleBet(player, () => "");
+    // The dealer's bootstrap fills the missing keys without touching what was set.
+    expect(await bootstrapCity(admin, { pvpDeals: false })).toContain("경제 설정 갱신");
+    expect(economyNeedsUpgrade((await getDoc(refs.config(admin.db))).data())).toBe(false);
   });
 });
 

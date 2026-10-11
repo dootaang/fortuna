@@ -1,9 +1,9 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { GoogleAuthProvider, signInWithPopup, signOut, type User } from "firebase/auth";
 import { type Timestamp } from "firebase/firestore";
 import { DEFAULT_ECONOMY, DEFAULT_NOTIFY, normalizeEconomy, normalizeNotify, type EconomyConfig, type NotifyConfig, type Wallet } from "@fortuna/core";
-import { refs, friendlyError, type DistrictDoc, type PlayerDoc, type PoolDoc, type Session } from "@fortuna/data";
+import { economyNeedsUpgrade, refs, friendlyError, saveEconomy, type DistrictDoc, type PlayerDoc, type PoolDoc, type Session } from "@fortuna/data";
 import { auth, clock, db, usingEmulators } from "../firebase.ts";
 import { useAuthUser } from "../session/auth.ts";
 import { useLiveDoc, useLiveQuery, type Row } from "../session/live.ts";
@@ -101,6 +101,12 @@ function DealerData({ uid, email }: { uid: string; email: string }) {
   const notify = useLiveDoc(refs.notify(db), "dealer:notify");
   const vault = useLiveDoc(refs.vault(db), "dealer:vault");
   const treasury = useLiveDoc(refs.treasury(db), "dealer:treasury");
+
+  // Bring a config saved by an older version up to date as soon as the dealer opens the screen.
+  const rawConfig = config.status === "ready" ? config.data : null;
+  useEffect(() => {
+    if (rawConfig && economyNeedsUpgrade(rawConfig)) void saveEconomy({ db, uid, clock }, normalizeEconomy(rawConfig), null).catch(() => undefined);
+  }, [rawConfig]);
 
   const value = useMemo<DealerData>(() => ({
     session: { db, uid, clock },

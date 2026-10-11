@@ -1,6 +1,6 @@
 import { addDoc, deleteDoc, doc, getDoc, getDocs, increment, query, runTransaction, serverTimestamp, setDoc, where, writeBatch, type Timestamp } from "firebase/firestore";
 import {
-  DEFAULT_ECONOMY, DEFAULT_NOTIFY, DISTRICTS, accessCodeHash, emptyWallet, finalizeEconomy, generateAccessCode, normalizeNotify,
+  DEFAULT_ECONOMY, DEFAULT_NOTIFY, DISTRICTS, accessCodeHash, emptyWallet, finalizeEconomy, generateAccessCode, normalizeEconomy, normalizeNotify,
   type EconomyConfig, type NotifyConfig,
 } from "@fortuna/core";
 import { FortunaError, writeEntry, type Session } from "./ledger-write.ts";
@@ -8,6 +8,15 @@ import { readWallet } from "./player-ops.ts";
 import { refs, type EventKind, type FundDoc, type PlayerDoc, type ShopItemDoc, type SkillDoc } from "./refs.ts";
 
 const DEFAULT_DEDUCTION_BPS = 5_000;
+
+/**
+ * A config saved by an older version lacks newer keys (limitPeriod, limits, pvp, shopEnabled).
+ * Values the dealer set are kept; only missing fields are filled with defaults.
+ */
+export function economyNeedsUpgrade(stored: unknown): boolean {
+  const raw = (stored ?? {}) as Record<string, any>;
+  return raw.limitPeriod === undefined || raw.shopEnabled === undefined || raw.pvp === undefined || raw.work?.limit === undefined || raw.gambling?.limit === undefined;
+}
 
 async function adminEvent(session: Session, kind: EventKind, payload: Record<string, string | number | boolean>): Promise<string> {
   const ref = await addDoc(refs.events(session.db), { kind, ledgerId: null, playerId: null, actorUid: session.uid, at: serverTimestamp() as unknown as Timestamp, sentAt: null, payload });
@@ -21,7 +30,9 @@ async function log(session: Session, kind: string, target: string, amount: numbe
 /** Create whatever the city still lacks: settings, districts, vault, joint treasury. Safe to run repeatedly. */
 export async function bootstrapCity(session: Session, options: { pvpDeals?: boolean } = {}): Promise<string[]> {
   const { db } = session, created: string[] = [], batch = writeBatch(db);
-  if (!(await getDoc(refs.config(db))).exists()) { batch.set(refs.config(db), finalizeEconomy(DEFAULT_ECONOMY)); created.push("경제 설정"); }
+  const stored = (await getDoc(refs.config(db))).data();
+  if (!stored) { batch.set(refs.config(db), finalizeEconomy(DEFAULT_ECONOMY)); created.push("경제 설정"); }
+  else if (economyNeedsUpgrade(stored)) { batch.set(refs.config(db), finalizeEconomy(normalizeEconomy(stored))); created.push("경제 설정 갱신"); }
   if (!(await getDoc(refs.notify(db))).exists()) { batch.set(refs.notify(db), DEFAULT_NOTIFY); created.push("알림 설정"); }
   for (const district of DISTRICTS) {
     if (!(await getDoc(refs.district(db, district.id))).exists()) { batch.set(refs.district(db, district.id), { liberated: false, deductionBps: DEFAULT_DEDUCTION_BPS }); created.push(`구역 ${district.name}`); }
