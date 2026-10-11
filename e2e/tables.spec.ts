@@ -44,7 +44,7 @@ test("the remaining tables and work shifts play to the end", async ({ page }) =>
   await open(page, "alley", "old-maid");
   for (const until = Date.now() + 90_000; Date.now() < until && !(await again(page).isVisible());) {
     const pick = page.getByRole("button", { name: /딜러의 1번째 카드 뽑기/ });
-    if (await pick.isEnabled().catch(() => false)) await pick.click().catch(() => undefined);
+    if (await pick.isEnabled({ timeout: 500 }).catch(() => false)) await pick.click({ timeout: 1_000 }).catch(() => undefined);
     await page.waitForTimeout(300);
   }
   await expect(again(page)).toBeVisible({ timeout: 15_000 });
