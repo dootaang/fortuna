@@ -84,13 +84,18 @@ test("arrival, work, gamble, shop and wallet on a phone", async ({ page }) => {
   await page.getByRole("button", { name: "닫기" }).click();
 
   // Wallet: pay a boosted skill (4→5 = 300 + 1,000) by borrowing the shortfall if needed.
-  await page.goto("/wallet");
+  await page.getByRole("link", { name: "특기" }).click();
+  await expect(page).toHaveURL(/\/skills$/);
   await page.getByRole("radio", { name: /쾌검/ }).click();
   await page.getByRole("button", { name: "5점", exact: true }).click();
   await expect(page.getByText("1,300").first()).toBeVisible();
   await page.getByRole("button", { name: /결제 · 1,300/ }).click();
-  await expect(page.getByText("특기 결제").first()).toBeVisible();
+  await expect(page.getByText("PAID")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("li", { hasText: "쾌검" }).first()).toContainText("5점");
+  await page.screenshot({ path: "test-results/shots/09-skills.png", fullPage: true, animations: "disabled" });
+  await page.goto("/wallet");
   await expect(page.getByText(/쾌검 4→5점/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "모금함" })).toBeVisible();
   await page.screenshot({ path: "test-results/shots/09-wallet.png", fullPage: true, animations: "disabled" });
   expect(errors).toEqual([]);
 });
@@ -110,5 +115,23 @@ test("a wrong code is politely refused", async ({ browser }) => {
   await page.getByPlaceholder("FRT-XXXX-XXXX-XXXX").fill("FRT-0000-0000-0000");
   await page.getByRole("button", { name: "개찰구 통과" }).click();
   await expect(page.getByText(/등록되지 않은 접속 코드/)).toBeVisible();
+  await context.close();
+});
+
+test("with the shop switched off, skills take its place", async ({ browser }) => {
+  await resetEmulators();
+  const quiet = await seedCity(false);
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto("/");
+  await page.getByPlaceholder("FRT-XXXX-XXXX-XXXX").fill(quiet.code);
+  await page.getByRole("button", { name: "개찰구 통과" }).click();
+  await page.getByRole("button", { name: "봉투를 받는다" }).click();
+  await page.getByRole("button", { name: "환영 봉투 열기" }).click();
+  await page.getByRole("button", { name: "도시로 들어선다" }).click();
+  await expect(page.getByRole("link", { name: /특기/ }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: /상점/ })).toHaveCount(0);
+  await page.goto("/shop");
+  await expect(page).toHaveURL(/\/$/);
   await context.close();
 });

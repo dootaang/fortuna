@@ -123,7 +123,7 @@ const TABS = [
   { id: "players", label: "플레이어" },
   { id: "ledger", label: "기록" },
   { id: "districts", label: "구역" },
-  { id: "shop", label: "상점·모금" },
+  { id: "shop", label: "모금·상점" },
   { id: "vault", label: "금고" },
   { id: "settings", label: "설정" },
 ] as const;

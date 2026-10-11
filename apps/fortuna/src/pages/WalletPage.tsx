@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { getDoc, limit, orderBy, query, where, type Timestamp } from "firebase/firestore";
-import { LEDGER_LABELS, TEXT, borrowDebt, fill, skillCost, usesLeft, type LedgerEntry } from "@fortuna/core";
-import { depositJoint, friendlyError, paySkill, refs, repayDebt, useItem, type InventoryDoc } from "@fortuna/data";
+import { LEDGER_LABELS, TEXT, usesLeft, type LedgerEntry } from "@fortuna/core";
+import { depositJoint, friendlyError, refs, repayDebt, useItem, type InventoryDoc } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { useLiveQuery, type Row } from "../session/live.ts";
-import { Coins, Empty, Frame, Modal, NumberField, PageTitle, Stat, TextField, cx, formatDate, useAction } from "../ui/kit.tsx";
+import { Coins, Empty, Frame, Modal, NumberField, PageTitle, Stat, cx, formatDate, useAction } from "../ui/kit.tsx";
 import { relay } from "../relay.ts";
+import { FundsSection } from "./Funds.tsx";
 
 export default function WalletPage() {
   const { wallet, config, session, player } = usePlayer();
@@ -21,72 +22,12 @@ export default function WalletPage() {
           <Stat label={TEXT.wallet.gambleLeft}><span className="num">{usesLeft(wallet, config, "gamble", now)}</span></Stat>
         </div>
       </Frame>
-      <SkillPayment />
       <Repay />
-      <Inventory />
       <JointWallet />
+      <FundsSection />
+      <Inventory />
       <History />
     </div>
-  );
-}
-
-function SkillPayment() {
-  const { player, config, wallet, session, notify } = usePlayer();
-  const { busy, run } = useAction();
-  const skills = Object.entries(player.skills).sort((a, b) => a[1].name.localeCompare(b[1].name, "ko"));
-  const [skillId, setSkillId] = useState(skills[0]?.[0] ?? "");
-  const skill = player.skills[skillId];
-  const [boost, setBoost] = useState(0);
-  const [note, setNote] = useState("");
-  const maxLevel = config.skill.cumulative.length - 1;
-  const used = skill ? Math.min(maxLevel, skill.level + boost) : 0;
-  const cost = skill ? skillCost(skill.level, used, config.skill.cumulative) : 0;
-  const shortfall = Math.max(0, cost - wallet.balance);
-  const canBorrow = config.borrow.enabled && shortfall > 0;
-
-  if (!skills.length) return <Frame><h2 className="deco-title text-lg">{TEXT.skill.title}</h2><Empty>{TEXT.skill.noSkills}</Empty></Frame>;
-  return (
-    <Frame>
-      <h2 className="deco-title text-lg">{TEXT.skill.title}</h2>
-      <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="특기">
-        {skills.map(([id, entry]) => (
-          <button key={id} type="button" role="radio" aria-checked={id === skillId} className={cx("btn btn-sm", id === skillId ? "btn-gold" : "btn-dark")} onClick={() => { setSkillId(id); setBoost(0); }}>
-            {entry.name} <span className="num">{entry.level}점</span>
-          </button>
-        ))}
-      </div>
-      {skill && (
-        <>
-          <div className="mt-4">
-            <p className="field-label">웃돈 단계 (사용 점수)</p>
-            <div className="flex flex-wrap gap-1.5">
-              {Array.from({ length: Math.max(1, maxLevel - skill.level + 1) }, (_, step) => (
-                <button key={step} type="button" className={cx("btn btn-sm min-w-12 num", step === boost ? "btn-gold" : "btn-dark")} onClick={() => setBoost(step)}>{skill.level + step}점</button>
-              ))}
-            </div>
-          </div>
-          <ul className="mt-3 space-y-0.5 text-sm">
-            {Array.from({ length: used - skill.level + 1 }, (_, step) => {
-              const level = skill.level + step, price = config.skill.costs[level] ?? 0;
-              return <li key={level} className="flex justify-between text-mist"><span>{step === 0 ? `기본 ${level}점` : `웃돈 ${level}점`}</span><Coins value={price} /></li>;
-            })}
-            <li className="flex justify-between border-t border-gold-400/30 pt-1 text-base font-bold text-gold-200"><span>총액</span><Coins value={cost} /></li>
-          </ul>
-          <div className="mt-3"><TextField label="장면 메모 (선택)" value={note} onChange={setNote} maxLength={200} placeholder="예: 간부의 검을 받아낸다" /></div>
-          {shortfall > 0 && (
-            <p className="mt-3 text-sm text-[#f2b3aa]">
-              {canBorrow ? fill(TEXT.skill.borrowOffer, { amount: shortfall, debt: borrowDebt(shortfall, config.borrow.feeBps) }) : "잔액이 부족합니다."}
-            </p>
-          )}
-          <button
-            type="button" className="btn btn-gold mt-3 w-full" disabled={busy || (shortfall > 0 && !canBorrow)}
-            onClick={() => void run(() => paySkill(session, { skillId, usedLevel: used, note, borrow: shortfall > 0 }), TEXT.skill.paid).then((id) => { if (id) { setNote(""); setBoost(0); relay(notify.relayUrl, id); } })}
-          >
-            {shortfall > 0 ? "빌려서 결제" : "결제"} · {cost.toLocaleString("ko-KR")}
-          </button>
-        </>
-      )}
-    </Frame>
   );
 }
 
@@ -113,7 +54,9 @@ function Repay() {
 function Inventory() {
   const { session } = usePlayer();
   const owned = useLiveQuery(query(refs.inventories(session.db), where("playerId", "==", session.pid)), `wallet:inv:${session.pid}`);
+  const { config } = usePlayer();
   const rows = (owned.status === "ready" ? owned.data : []).filter((row) => row.data.quantity > 0 || row.data.used > 0).sort((a, b) => a.data.itemName.localeCompare(b.data.itemName, "ko"));
+  if (!config.shopEnabled && rows.length === 0) return null;
   return (
     <Frame>
       <h2 className="deco-title text-lg">{TEXT.wallet.items}</h2>

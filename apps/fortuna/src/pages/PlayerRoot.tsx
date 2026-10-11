@@ -49,7 +49,7 @@ const NAV = [
   { to: "/", label: "로비", icon: "◆", end: true },
   { to: "/work", label: "일터", icon: "⚒" },
   { to: "/alley", label: "도박장", icon: "♠", also: "/house" },
-  { to: "/shop", label: "상점", icon: "✦" },
+  { to: "/skills", label: "특기", icon: "✦" },
   { to: "/wallet", label: "지갑", icon: "◈" },
 ];
 

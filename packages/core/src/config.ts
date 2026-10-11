@@ -16,6 +16,8 @@ export interface GameVenueConfig {
 export interface EconomyConfig {
   /** How often the work/gamble counters refill (00:00 KST). */
   limitPeriod: LimitPeriod;
+  /** The item shop is optional; skill payments are the main coin sink. */
+  shopEnabled: boolean;
   welcome: { loan: number; debt: number; gateFee: number };
   borrow: { enabled: boolean; feeBps: number };
   work: { limit: number; baseWage: number; wageMin: number; wageMax: number; wageStep: number };
@@ -43,6 +45,7 @@ function defaultGames(): EconomyConfig["gambling"]["games"] {
 
 export const DEFAULT_ECONOMY: EconomyConfig = {
   limitPeriod: "day",
+  shopEnabled: false,
   welcome: { loan: 1_000, debt: 1_500, gateFee: 100 },
   borrow: { enabled: true, feeBps: 5_000 },
   work: { limit: 10, baseWage: 200, wageMin: 150, wageMax: 250, wageStep: 10 },
@@ -81,6 +84,7 @@ export function normalizeEconomy(raw: unknown): EconomyConfig {
   const costs = Array.isArray(skill.costs) && skill.costs.length >= 2 && skill.costs.every((cost) => Number.isSafeInteger(cost) && (cost as number) >= 0) ? (skill.costs as number[]) : [...d.skill.costs];
   return {
     limitPeriod: source.limitPeriod === "week" ? "week" : source.limitPeriod === "day" ? "day" : d.limitPeriod,
+    shopEnabled: typeof source.shopEnabled === "boolean" ? source.shopEnabled : d.shopEnabled,
     welcome: { loan: int(welcome.loan, d.welcome.loan), debt: int(welcome.debt, d.welcome.debt), gateFee: int(welcome.gateFee, d.welcome.gateFee) },
     borrow: { enabled: typeof borrow.enabled === "boolean" ? borrow.enabled : d.borrow.enabled, feeBps: int(borrow.feeBps, d.borrow.feeBps, 0, 100_000) },
     work: {

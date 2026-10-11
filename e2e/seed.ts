@@ -39,10 +39,10 @@ export async function withDealer<T>(email: string, fn: (session: Session) => Pro
 
 export interface SeededCity { code: string; pid: string; rumorId: string; }
 
-export async function seedCity(): Promise<SeededCity> {
+export async function seedCity(shopEnabled = true): Promise<SeededCity> {
   return withDealer("dealer@example.com", async (session) => {
     await bootstrapCity(session);
-    await saveEconomy(session, { ...DEFAULT_ECONOMY, gambling: { ...DEFAULT_ECONOMY.gambling, houseOpen: true } }, DEFAULT_ECONOMY);
+    await saveEconomy(session, { ...DEFAULT_ECONOMY, shopEnabled, gambling: { ...DEFAULT_ECONOMY.gambling, houseOpen: true } }, DEFAULT_ECONOMY);
     const { pid, code } = await createPlayer(session, { name: "에이든", districtId: "wuxia", skills: [{ id: "blade", name: "쾌검", level: 4 }, { id: "qinggong", name: "경공", level: 2 }], note: "" });
     const rumorId = await saveItem(session, null, {
       name: "무협 간부의 버릇", description: "객잔 주인이 슬쩍 흘린 이야기.", price: 300, category: "rumor", stock: 3, perPlayerLimit: 1,

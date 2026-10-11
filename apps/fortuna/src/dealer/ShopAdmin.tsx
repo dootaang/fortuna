@@ -19,7 +19,7 @@ const blankItem = (category: ShopCategory = "rumor"): ItemInput => ({
 });
 
 export function ShopAdmin() {
-  const { session } = useDealer();
+  const { session, config } = useDealer();
   const items = useLiveQuery(refs.items(session.db), "dealer:items");
   const funds = useLiveQuery(refs.funds(session.db), "dealer:funds");
   const [editing, setEditing] = useState<{ id: string | null; data: ItemInput } | null>(null);
@@ -29,7 +29,8 @@ export function ShopAdmin() {
 
   return (
     <div className="space-y-6">
-      <section>
+      <section className={cx(!config.shopEnabled && "opacity-60")}>
+        {!config.shopEnabled && <p className="mb-2 text-sm text-mist">상점이 꺼져 있습니다(설정 › 경제 설정 › 상점 켜기). 품목은 미리 준비해 둘 수 있습니다.</p>}
         <SectionTitle title="상점 품목"><button type="button" className="btn btn-gold btn-sm" onClick={() => setEditing({ id: null, data: blankItem() })}>+ 품목 추가</button></SectionTitle>
         <div className="deco-frame overflow-x-auto p-2">
           <table className="table min-w-[46rem]">

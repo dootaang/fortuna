@@ -41,7 +41,8 @@ export function Lobby() {
         <VenueCard to="/work" icon="⚒" title={TEXT.lobby.work} meta={district?.liberated ? "구역 해방 · 공제 없음" : `지배인 몫 ${deduction}%`} />
         <VenueCard to="/alley" icon="♣" title={TEXT.lobby.alley} meta={`1판 최대 ${config.gambling.alleyMaxBet.toLocaleString("ko-KR")}`} />
         <VenueCard to="/house" icon="♛" title={TEXT.lobby.house} meta={config.gambling.houseOpen ? `1판 최대 ${config.gambling.houseMaxBet.toLocaleString("ko-KR")}` : "잠김"} locked={!config.gambling.houseOpen} />
-        <VenueCard to="/shop" icon="✦" title={TEXT.lobby.shop} meta="소문 · 소모품 · 도전권" />
+        <VenueCard to="/skills" icon="✦" title={TEXT.skill.title} meta={Object.values(player.skills).map((skill) => `${skill.name} ${skill.level}점`).join(" · ") || "등록된 특기 없음"} />
+        {config.shopEnabled && <VenueCard to="/shop" icon="✧" title={TEXT.lobby.shop} meta="소문 · 소모품 · 도전권" />}
       </div>
 
       <Frame>

@@ -61,6 +61,8 @@ function EconomyEditor({ config }: { config: EconomyConfig }) {
               </button>
             ))}
           </div>
+          <legend className="deco-caps mb-1 pt-2">상점</legend>
+          <Toggle label="상점 켜기" hint="꺼 두면 플레이어 화면에서 상점이 사라집니다. 품목과 구매 기록은 그대로 남습니다." checked={draft.shopEnabled} onChange={(value) => update((next) => { next.shopEnabled = value; })} />
           <legend className="deco-caps mb-1 pt-2">도착</legend>
           <div className="grid grid-cols-3 gap-2">
             <NumberField label="환영 봉투" value={draft.welcome.loan} onChange={(value) => update((next) => { next.welcome.loan = value; })} />
