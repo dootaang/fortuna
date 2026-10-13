@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router";
-import { COINS, COIN_IDS, periodWords, type CoinId } from "@fortuna/core";
+import { COINS, COIN_IDS, entryPaused, periodWords, type CoinId } from "@fortuna/core";
 import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
 import { Frame, Notice, PageTitle, cx, formatDate } from "../ui/kit.tsx";
 import { VenueTabs } from "../pages/VenueList.tsx";
 import { PositionCard } from "./Positions.tsx";
+import { HoldingsList } from "./HoldingsList.tsx";
 import { CoinBadge, FlapText, Sparkline, changeText, priceText } from "./pieces.tsx";
 import { directionOf, openingPrice, useCountdown, useFeed, useMarketConfig, useMyPositions, useTape } from "./useMarket.ts";
 import "./market.css";
@@ -22,6 +23,8 @@ export default function MarketPage() {
   const feed = useFeed(12);
   const counters = wallet.market ?? { period: -1, used: 0, open: 0 };
   const usedToday = counters.period === session.clock.period(economy.limitPeriod) ? counters.used : 0;
+  const spotCounters = wallet.spot ?? { period: -1, used: 0 };
+  const spotUsed = spotCounters.period === session.clock.period(economy.limitPeriod) ? spotCounters.used : 0;
   const stale = tick ? now() - tick.at.toMillis() > market.staleSeconds * 1000 : true;
 
   // One soft clack per tick, and the station bell when news lands.
@@ -56,16 +59,17 @@ export default function MarketPage() {
               </div>
             </div>
             <ul>
-              {COIN_IDS.map((coin) => <BoardRow key={coin} coin={coin} tape={tape} halted={!market.coins[coin].enabled} />)}
+              {COIN_IDS.map((coin) => <BoardRow key={coin} coin={coin} tape={tape} halted={!market.coins[coin].enabled} paused={entryPaused(market, coin, tick?.st.liberated ?? [])} />)}
             </ul>
           </section>
 
           <Frame className="mb-4">
             <p className="flex flex-wrap justify-between gap-2 text-sm">
-              <span>{periodWords(economy.limitPeriod).now} 새 거래 <b className="num text-gold-200">{Math.max(0, market.dailyLimit - usedToday)}</b> / {market.dailyLimit}</span>
+              <span>{periodWords(economy.limitPeriod).now} 현물 매수 <b className="num text-gold-200">{Math.max(0, market.spotDailyLimit - spotUsed)}</b> / {market.spotDailyLimit}</span>
+              <span>선물 새 거래 <b className="num text-gold-200">{Math.max(0, market.dailyLimit - usedToday)}</b> / {market.dailyLimit}</span>
               <span>열린 포지션 <b className="num text-gold-200">{counters.open}</b> / {market.maxOpen}</span>
             </p>
-            <p className="mt-1 text-xs text-mist">수수료 진입·청산 각 {market.feeBps / 100}% · 빌린 돈 이자 시간당 {market.interestBps / 100}% · 손실이 증거금의 {market.liquidationBps / 100}%에 닿으면 강제 청산 · 수익이 증거금의 {market.capMultiple}배면 자동 익절</p>
+            <p className="mt-1 text-xs text-mist">현물은 그냥 사고팔기(이자·강제 청산 없음). 선물은 수수료 진입·청산 각 {market.feeBps / 100}% · 빌린 돈 이자 시간당 {market.interestBps / 100}% · 손실이 증거금의 {market.liquidationBps / 100}%에 닿으면 강제 청산 · 수익이 증거금의 {market.capMultiple}배면 자동 익절</p>
             {!economy.gambling.houseOpen && <p className="mt-1 text-xs text-gold-200">하우스가 열리면 배율 한도가 올라갑니다.</p>}
           </Frame>
 
@@ -75,6 +79,8 @@ export default function MarketPage() {
               {positions.map((row) => <PositionCard key={row.id} row={row} tick={tick} market={market} />)}
             </section>
           )}
+
+          <div className="mb-4"><HoldingsList title="내 현물" /></div>
 
           <section aria-label="환전가 소식">
             <h2 className="deco-title mb-2 text-lg">환전가 소식</h2>
@@ -95,7 +101,7 @@ export default function MarketPage() {
   );
 }
 
-function BoardRow({ coin, tape, halted }: { coin: CoinId; tape: ReturnType<typeof useTape>; halted: boolean }) {
+function BoardRow({ coin, tape, halted, paused }: { coin: CoinId; tape: ReturnType<typeof useTape>; halted: boolean; paused: boolean }) {
   const def = COINS[coin], tick = tape.latest?.tick ?? null;
   const price = tick?.p[coin];
   const direction = directionOf(tick, coin);
@@ -111,6 +117,7 @@ function BoardRow({ coin, tape, halted }: { coin: CoinId; tape: ReturnType<typeo
           <p className="truncate text-[0.7rem] text-mist">
             {def.place}
             {halted && <span className="ml-1 text-[#f2b3aa]">· 거래 정지</span>}
+            {!halted && paused && <span className="ml-1 text-[#f2b3aa]">· 간부전 대기</span>}
             {!halted && state?.storm && <span className="ml-1 text-gold-200">· 폭풍</span>}
             {liberated && <span className="ml-1 text-[#a9ecc9]">· 해방</span>}
           </p>

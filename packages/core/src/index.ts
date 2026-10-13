@@ -19,3 +19,4 @@ export * from "./market/position.ts";
 export * from "./market/feed.ts";
 export * from "./market/engine.ts";
 export * from "./market/tape.ts";
+export * from "./market/spot.ts";

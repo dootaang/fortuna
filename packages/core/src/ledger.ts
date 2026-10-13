@@ -3,7 +3,7 @@ import type { GameId, Venue, WagerTrace } from "./games/types.ts";
 /** Firestore Timestamp without importing the SDK into the pure core. */
 export interface TimestampLike { toMillis(): number; }
 
-export const LEDGER_TYPES = ["arrival", "work", "betOpen", "betSettle", "skill", "repay", "jointDeposit", "fundContribution", "shop", "itemUse", "adminAdjust", "pvpStake", "pvpPayout", "marketOpen", "marketClose"] as const;
+export const LEDGER_TYPES = ["arrival", "work", "betOpen", "betSettle", "skill", "repay", "jointDeposit", "fundContribution", "shop", "itemUse", "adminAdjust", "pvpStake", "pvpPayout", "marketOpen", "marketClose", "spotBuy", "spotSell"] as const;
 export type LedgerType = (typeof LEDGER_TYPES)[number];
 
 export interface WagerStep<T = TimestampLike> { a: string; t: T; }
@@ -49,6 +49,8 @@ export interface Wallet<T = TimestampLike> {
   room?: string | null;
   /** Exchange counters. Missing on wallets created before the exchange. */
   market?: MarketCounters;
+  /** Spot buys in the current limit period. Missing on wallets created before spot trading. */
+  spot?: { period: number; used: number };
 }
 
 /** Trades opened in `period` (config/economy limitPeriod) and positions still unsettled. */
@@ -90,6 +92,8 @@ export const LEDGER_LABELS: Readonly<Record<LedgerType, string>> = {
   pvpPayout: "대결 정산",
   marketOpen: "거래소 진입",
   marketClose: "거래소 정산",
+  spotBuy: "현물 매수",
+  spotSell: "현물 매도",
 };
 
 /** Ledger filter groups for the admin history view. */
@@ -104,9 +108,9 @@ export const LEDGER_GROUPS: Readonly<Record<string, readonly LedgerType[]>> = {
   "관리자 조정": ["adminAdjust"],
   도착: ["arrival"],
   대결: ["pvpStake", "pvpPayout"],
-  거래소: ["marketOpen", "marketClose"],
+  거래소: ["marketOpen", "marketClose", "spotBuy", "spotSell"],
 };
 
 export function emptyWallet(playerId: string): Wallet<never> {
-  return { playerId, balance: 0, debt: 0, seq: 0, arrived: false, periodIndex: 0, workUsed: 0, gambleUsed: 0, openWager: null, room: null, market: { period: 0, used: 0, open: 0 } };
+  return { playerId, balance: 0, debt: 0, seq: 0, arrived: false, periodIndex: 0, workUsed: 0, gambleUsed: 0, openWager: null, room: null, market: { period: 0, used: 0, open: 0 }, spot: { period: 0, used: 0 } };
 }

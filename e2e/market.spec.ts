@@ -42,6 +42,19 @@ test("exchange: board, chart, leveraged long with the loan slip, close", async (
     await expect(page.getByRole("heading", { name: "포르투나 코인" })).toBeVisible();
   }
 
+  // Spot: buy 100 coins' worth, then sell it all.
+  await expect(page.getByRole("tab", { name: "현물 · 사고팔기" })).toHaveAttribute("aria-selected", "true");
+  await page.getByLabel("살 금액 (코인)").fill("100");
+  await page.getByRole("button", { name: "포르투나 코인 사기" }).click();
+  await expect(page.getByText(/FTN [\d.]+개를 샀습니다/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("평균 매입가")).toBeVisible();
+  await page.screenshot({ path: "test-results/shots/35-market-spot.png", fullPage: true, animations: "disabled" });
+  await page.getByRole("button", { name: "팔기", exact: true }).click();
+  await page.getByRole("button", { name: "포르투나 코인 팔기" }).click();
+  await expect(page.getByText(/FTN [\d.]+개를 팔았습니다/)).toBeVisible({ timeout: 15_000 });
+
+  // Futures.
+  await page.getByRole("tab", { name: "선물 · 레버리지" }).click();
   await page.getByLabel("증거금 (코인)").fill("100");
   await page.getByRole("button", { name: "5배", exact: true }).click();
   await page.screenshot({ path: "test-results/shots/31-market-coin.png", fullPage: true, animations: "disabled" });
@@ -66,6 +79,8 @@ test("exchange: board, chart, leveraged long with the loan slip, close", async (
   await page.goto("/wallet");
   await expect(page.getByText("거래소 진입").first()).toBeVisible();
   await expect(page.getByText("거래소 정산").first()).toBeVisible();
+  await expect(page.getByText("현물 매수").first()).toBeVisible();
+  await expect(page.getByText("현물 매도").first()).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -81,9 +96,10 @@ test("dealer: exchange tab shows the recorder, positions and news desk", async (
   await allowDealer(uid);
   await page.getByRole("button", { name: "거래소", exact: true }).click();
   await expect(page.getByText(/· 정상/)).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("button", { name: "중원" }).click();
-  await expect(page.getByLabel("소식 문구 (구역의 목소리로 한 줄)")).toHaveValue(/중원 간부전이 예고되었다/);
-  await page.getByRole("button", { name: "발행 예약" }).click();
-  await expect(page.getByText("예약했습니다.")).toBeVisible();
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "중원", exact: true }).click();
+  await expect(page.getByText("중원 간부전을 예고했습니다.")).toBeVisible();
+  await expect(page.getByText(/간부전 대기 \(새 진입·매수 정지\)/)).toBeVisible();
+  await expect(page.getByText("중원 간부전이 예고되었다. 거리의 말소리가 낮아진다.")).toBeVisible();
   await page.screenshot({ path: "test-results/shots/34-dealer-market.png", fullPage: true, animations: "disabled" });
 });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import { COINS, isCoinId, leverageChoices, maxLeverage, quoteOpen, type CoinId, type MarketConfig, type OpenQuote, type Side } from "@fortuna/core";
+import { COINS, entryPaused, isCoinId, leverageChoices, maxLeverage, quoteOpen, type CoinId, type MarketConfig, type OpenQuote, type Side } from "@fortuna/core";
 import { openPosition } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
@@ -8,6 +8,7 @@ import { wait } from "../fx/settings.ts";
 import { Coins, Frame, Modal, Notice, cx, formatDate, useAction } from "../ui/kit.tsx";
 import { ChartBoundary, PriceChart, type ChartFlag, type ChartLine } from "./PriceChart.tsx";
 import { PositionCard } from "./Positions.tsx";
+import { SpotPanel } from "./SpotPanel.tsx";
 import { CoinBadge, FlapText, changeText, priceText } from "./pieces.tsx";
 import { directionOf, openingPrice, useCountdown, useFeed, useMarketConfig, useMyPositions, useTape } from "./useMarket.ts";
 import "./market.css";
@@ -75,7 +76,7 @@ function CoinView({ coin }: { coin: CoinId }) {
         </section>
       )}
 
-      <OrderPanel coin={coin} market={market} price={price ?? null} stale={!tick || now() - tick.at.toMillis() > market.staleSeconds * 1000} />
+      <TradePanel coin={coin} market={market} price={price ?? null} stale={!tick || now() - tick.at.toMillis() > market.staleSeconds * 1000} paused={entryPaused(market, coin, tick?.st.liberated ?? [])} />
 
       {feed.some((row) => row.data.coin === coin) && (
         <section className="mt-5" aria-label="이 종목 소식">
@@ -96,7 +97,32 @@ function CoinView({ coin }: { coin: CoinId }) {
 
 const MARGIN_STEPS = [10, 50, 100, 500];
 
-function OrderPanel({ coin, market, price, stale }: { coin: CoinId; market: MarketConfig; price: number | null; stale: boolean }) {
+type Mode = "spot" | "futures";
+const MODE_KEY = "fortuna:market:mode";
+
+function readMode(): Mode {
+  try { return window.localStorage.getItem(MODE_KEY) === "futures" ? "futures" : "spot"; } catch { return "spot"; }
+}
+
+/** 현물 | 선물. The last choice is remembered on this device. */
+function TradePanel(props: { coin: CoinId; market: MarketConfig; price: number | null; stale: boolean; paused: boolean }) {
+  const [mode, setMode] = useState<Mode>(readMode);
+  function choose(next: Mode) {
+    setMode(next);
+    try { window.localStorage.setItem(MODE_KEY, next); } catch { /* private mode: not remembered */ }
+  }
+  return (
+    <Frame>
+      <div className="mb-4 grid grid-cols-2 gap-1 rounded-sm border border-gold-400/30 bg-ink/60 p-1" role="tablist" aria-label="거래 방식">
+        <button type="button" role="tab" aria-selected={mode === "spot"} className={cx("btn btn-sm", mode === "spot" ? "btn-gold" : "btn-dark border-0")} onClick={() => choose("spot")}>현물 · 사고팔기</button>
+        <button type="button" role="tab" aria-selected={mode === "futures"} className={cx("btn btn-sm", mode === "futures" ? "btn-gold" : "btn-dark border-0")} onClick={() => choose("futures")}>선물 · 레버리지</button>
+      </div>
+      {mode === "spot" ? <SpotPanel {...props} /> : <OrderPanel {...props} />}
+    </Frame>
+  );
+}
+
+function OrderPanel({ coin, market, price, stale, paused }: { coin: CoinId; market: MarketConfig; price: number | null; stale: boolean; paused: boolean }) {
   const { session, wallet, player, config: economy } = usePlayer();
   const { busy, run } = useAction();
   const houseOpen = economy.gambling.houseOpen;
@@ -113,6 +139,7 @@ function OrderPanel({ coin, market, price, stale }: { coin: CoinId; market: Mark
   const lockedSteps = market.leverage.steps.filter((step) => step > maxLeverage(market, coin, houseOpen) && step <= maxLeverage(market, coin, true));
 
   const problem = !market.coins[coin].enabled ? "이 종목은 거래가 잠시 멈췄습니다."
+    : paused ? "간부전 결과가 나올 때까지 이 종목의 새 진입이 멈췄습니다. 가진 포지션은 청산할 수 있습니다."
     : stale ? "시세 기록원이 멈춰 있습니다. 잠시 후 다시 시도해 주세요."
     : usedToday >= market.dailyLimit ? "오늘 새 거래를 모두 열었습니다."
     : counters.open >= market.maxOpen ? `포지션은 동시에 ${market.maxOpen}개까지입니다.`
@@ -128,8 +155,7 @@ function OrderPanel({ coin, market, price, stale }: { coin: CoinId; market: Mark
   }
 
   return (
-    <Frame>
-      <h2 className="deco-title mb-3 text-lg">주문</h2>
+    <>
       <div className="mb-3 grid grid-cols-2 gap-2">
         <button type="button" className={cx("btn border", side === "long" ? "btn-gold" : "btn-dark side-long")} aria-pressed={side === "long"} onClick={() => setSide("long")}>롱 ▲ 오른다</button>
         <button type="button" className={cx("btn border", side === "short" ? "btn-gold" : "btn-dark side-short")} aria-pressed={side === "short"} onClick={() => setSide("short")}>숏 ▼ 내린다</button>
@@ -193,7 +219,7 @@ function OrderPanel({ coin, market, price, stale }: { coin: CoinId; market: Mark
           <button type="button" className="btn btn-gold" disabled={busy || stamped} onClick={() => { if (slip) void submit(slip); }}>{busy ? "접수 중…" : "서명하고 진입"}</button>
         </div>
       </Modal>
-    </Frame>
+    </>
   );
 }
 

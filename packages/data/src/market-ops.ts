@@ -1,7 +1,7 @@
 import { Timestamp, addDoc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Firestore, type Transaction } from "firebase/firestore";
 import {
-  DEFAULT_MARKET, HOUR_MS, KST_OFFSET_MS, hourIndexAt, leverageChoices, normalizeMarket, periodWords, quoteClose, quoteOpen,
-  type CloseKind, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
+  COINS, DEFAULT_MARKET, HOUR_MS, KST_OFFSET_MS, entryPaused, hourIndexAt, leverageChoices, normalizeMarket, periodWords, quoteBuy, quoteClose, quoteOpen, quoteSell,
+  type BuyQuote, type CloseKind, type SellQuote, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
 } from "@fortuna/core";
 import { FortunaError, writeEntry, type PlayerSession, type Session } from "./ledger-write.ts";
 import { readEconomy, readWallet } from "./player-ops.ts";
@@ -30,6 +30,8 @@ function requireFresh(tick: TickDoc<Timestamp>, config: MarketConfig, nowMs: num
   if (nowMs - tick.at.toMillis() > (config.staleSeconds - 5) * 1000) throw new FortunaError("stale-price", "시세가 멈춰 있습니다. 잠시 후 다시 시도해 주세요.");
 }
 
+const PAUSED_TEXT = "간부전 결과가 나올 때까지 이 종목의 새 진입과 매수가 멈췄습니다.";
+
 const counters = (wallet: { market?: { period: number; used: number; open: number } }) => wallet.market ?? { period: -1, used: 0, open: 0 };
 
 export interface OpenRequest { coin: CoinId; side: Side; leverage: number; margin: number; }
@@ -42,6 +44,7 @@ export async function openPosition(session: PlayerSession, request: OpenRequest)
     if (!wallet.arrived) throw new FortunaError("not-arrived", "먼저 도착 절차를 마쳐야 합니다.");
     if (!market.enabled) throw new FortunaError("market-closed", "거래소가 닫혀 있습니다.");
     if (!market.coins[request.coin].enabled) throw new FortunaError("coin-halted", "이 종목은 거래가 잠시 멈췄습니다.");
+    if (entryPaused(market, request.coin, tick.st.liberated)) throw new FortunaError("coin-paused", PAUSED_TEXT);
     if (!leverageChoices(market, request.coin, economy.gambling.houseOpen).includes(request.leverage)) throw new FortunaError("leverage", "지금 쓸 수 없는 배율입니다.");
     if (!Number.isInteger(request.margin) || request.margin < market.minMargin || request.margin > market.maxMargin) {
       throw new FortunaError("margin", `증거금은 ${market.minMargin}~${market.maxMargin.toLocaleString("ko-KR")}코인 사이여야 합니다.`);
@@ -132,7 +135,75 @@ export async function settleEndedPositions(session: PlayerSession, bigGamble = N
   return results;
 }
 
+// ── 현물 ──
+
+export async function buySpot(session: PlayerSession, coin: CoinId, amount: number): Promise<{ ledgerId: string; quote: BuyQuote }> {
+  const { db } = session;
+  return runTransaction(db, async (tx) => {
+    const wallet = await readWallet(tx, session), economy = await readEconomy(tx, db), market = await readMarket(tx, db);
+    const { hour, tick } = await readLatestTick(tx, db, session.clock.now());
+    const holdingRef = refs.holding(db, session.pid, coin), held = (await tx.get(holdingRef)).data();
+    if (!wallet.arrived) throw new FortunaError("not-arrived", "먼저 도착 절차를 마쳐야 합니다.");
+    if (!market.enabled) throw new FortunaError("market-closed", "거래소가 닫혀 있습니다.");
+    if (!market.coins[coin].enabled) throw new FortunaError("coin-halted", "이 종목은 거래가 잠시 멈췄습니다.");
+    if (entryPaused(market, coin, tick.st.liberated)) throw new FortunaError("coin-paused", PAUSED_TEXT);
+    if (!Number.isInteger(amount) || amount < market.minMargin || amount > market.spotMaxOrder) {
+      throw new FortunaError("amount", `한 번에 ${market.minMargin}~${market.spotMaxOrder.toLocaleString("ko-KR")}코인어치까지 살 수 있습니다.`);
+    }
+    requireFresh(tick, market, session.clock.now());
+    const before = wallet.spot ?? { period: -1, used: 0 }, period = session.clock.period(economy.limitPeriod);
+    const used = (before.period === period ? before.used : 0) + 1;
+    if (used > market.spotDailyLimit) throw new FortunaError("spot-limit", `${periodWords(economy.limitPeriod).now} 현물 매수를 모두 했습니다.`);
+    const quote = quoteBuy(market, amount, tick.p[coin]);
+    if (quote.units < 1) throw new FortunaError("amount", "금액이 너무 적어 살 수 있는 양이 없습니다.");
+    const ledgerId = writeEntry(tx, session, session.pid, wallet, {
+      type: "spotBuy", actor: "player", delta: -quote.cost, vaultDelta: quote.cost,
+      detail: { coin, amount, fee: quote.fee, price: quote.price, units: quote.units, hour, seq: tick.seq },
+      wallet: { spot: { period, used } },
+    });
+    tx.set(holdingRef, { playerId: session.pid, coin, units: (held?.units ?? 0) + quote.units, cost: (held?.cost ?? 0) + amount, lastLedger: ledgerId });
+    return { ledgerId, quote };
+  });
+}
+
+/** Sell `units` (1/10,000 coin) of a holding at the newest price; selling works even while buying is paused. */
+export async function sellSpot(session: PlayerSession, coin: CoinId, units: number): Promise<{ ledgerId: string; quote: SellQuote }> {
+  const { db } = session;
+  return runTransaction(db, async (tx) => {
+    const wallet = await readWallet(tx, session), market = await readMarket(tx, db);
+    const { hour, tick } = await readLatestTick(tx, db, session.clock.now());
+    const holdingRef = refs.holding(db, session.pid, coin), held = (await tx.get(holdingRef)).data();
+    if (!held || held.units < 1) throw new FortunaError("no-holding", `가진 ${COINS[coin].name}이(가) 없습니다.`);
+    if (!Number.isInteger(units) || units < 1 || units > held.units) throw new FortunaError("units", "팔 수량을 확인해 주세요.");
+    requireFresh(tick, market, session.clock.now());
+    const quote = quoteSell(market, units, tick.p[coin], held);
+    const ledgerId = writeEntry(tx, session, session.pid, wallet, {
+      type: "spotSell", actor: "player", delta: quote.payout, vaultDelta: -quote.payout,
+      detail: { coin, units, price: quote.price, gross: quote.gross, fee: quote.fee, payout: quote.payout, costOut: quote.costOut, hour, seq: tick.seq },
+    });
+    tx.set(holdingRef, { playerId: session.pid, coin, units: held.units - units, cost: held.cost - quote.costOut, lastLedger: ledgerId });
+    return { ledgerId, quote };
+  });
+}
+
 // ── 딜러 ──
+
+/** 간부전 예고: a news line that stirs the coin for six hours, and new entries/buys paused until liberation or release. */
+export async function announceBossFight(session: Session, coin: CoinId): Promise<string> {
+  const market = normalizeMarket((await getDoc(refs.marketConfig(session.db))).data());
+  await saveMarket(session, { ...market, coins: { ...market.coins, [coin]: { ...market.coins[coin], paused: true } } });
+  return scheduleNews(session, {
+    coin, dir: 0, size: "z", minutes: 360, headline: `${COINS[coin].place} 간부전이 예고되었다. 거리의 말소리가 낮아진다.`,
+    whisper: "", whisperMinutes: 10, delayMinutes: 0,
+  });
+}
+
+export async function setCoinPaused(session: Session, coin: CoinId, paused: boolean): Promise<void> {
+  const market = normalizeMarket((await getDoc(refs.marketConfig(session.db))).data());
+  await saveMarket(session, { ...market, coins: { ...market.coins, [coin]: { ...market.coins[coin], paused } } });
+}
+
+
 
 async function adminLog(session: Session, kind: string, target: string, amount: number, memo: string) {
   await addDoc(refs.adminLog(session.db), { kind, target, amount, memo, actorUid: session.uid, at: serverTimestamp() as unknown as Timestamp });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getDoc, limit, orderBy, query, where, type Timestamp } from "firebase/firestore";
 import { COIN_IDS, DEFAULT_MARKET, hourIndexAt, normalizeMarket, type CoinId, type HourDoc, type MarketConfig, type TickDoc } from "@fortuna/core";
-import { refs, settleEndedPositions, type FeedDoc, type PositionDoc } from "@fortuna/data";
+import { refs, settleEndedPositions, type FeedDoc, type HoldingDoc, type PositionDoc } from "@fortuna/data";
 import { db } from "../firebase.ts";
 import { usePlayer } from "../session/player.tsx";
 import { useLiveDoc, useLiveQuery, type Row } from "../session/live.ts";
@@ -129,3 +129,10 @@ export function openingPrice(hours: readonly HourDoc<Timestamp>[], coin: CoinId)
 }
 
 export const ALL_COINS = COIN_IDS;
+
+/** Spot holdings with something left in them. */
+export function useMyHoldings(): Row<HoldingDoc>[] {
+  const { session } = usePlayer();
+  const live = useLiveQuery(query(refs.holdings(db), where("playerId", "==", session.pid)), `holdings:${session.pid}`);
+  return useMemo(() => (live.status === "ready" ? live.data.filter((row) => row.data.units > 0) : []), [live]);
+}

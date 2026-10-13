@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { orderBy, query, limit, where } from "firebase/firestore";
 import {
-  COINS, COIN_IDS, NEWS_SIZE_LABELS, formatPrice, hourIndexAt, liveEquity, normalizeMarket,
+  COINS, COIN_IDS, NEWS_SIZE_LABELS, entryPaused, formatPrice, formatUnits, holdingValue, hourIndexAt, liveEquity, normalizeMarket,
   type CoinId, type MarketConfig, type NewsSize,
 } from "@fortuna/core";
-import { cancelNews, refs, registerOracle, saveMarket, scheduleNews, voidPosition, type NewsInput } from "@fortuna/data";
+import { announceBossFight, cancelNews, refs, registerOracle, saveMarket, scheduleNews, setCoinPaused, voidPosition, type NewsInput } from "@fortuna/data";
 import { useLiveDoc, useLiveQuery } from "../session/live.ts";
 import { Coins, Empty, Frame, Notice, NumberField, Stat, TextField, Toggle, cx, formatDate, useAction, useToast } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
@@ -19,6 +19,7 @@ export function MarketAdmin() {
     <div className="space-y-6">
       <Recorder market={market} />
       <OpenPositions market={market} />
+      <Holdings />
       <NewsDesk />
       <MarketEditor key={JSON.stringify(market)} market={market} />
     </div>
@@ -140,8 +141,13 @@ function NewsDesk() {
   const rows = news.status === "ready" ? news.data : [];
 
   function bossNotice(coin: CoinId) {
-    const def = COINS[coin];
-    setDraft({ coin, dir: 0, size: "z", minutes: 360, headline: `${def.place} 간부전이 예고되었다. 거리의 말소리가 낮아진다.`, whisper: "", whisperMinutes: 10, delayMinutes: 0 });
+    const place = COINS[coin].place;
+    if (!window.confirm(`${place} 간부전을 예고합니다.
+
+· 시세판에 예고 소식이 뜨고 ${coin}이(가) 6시간 출렁입니다.
+· 해방이 시세에 반영될 때까지 ${coin} 새 진입·매수가 멈춥니다(가진 것은 팔 수 있음).
+· 간부전이 무산되면 아래 "간부전 대기" 목록에서 해제하십시오.`)) return;
+    void run(() => announceBossFight(session, coin), `${place} 간부전을 예고했습니다.`);
   }
 
   return (
@@ -149,8 +155,9 @@ function NewsDesk() {
       <SectionTitle title="환전가 소식 발행" />
       <Frame>
         <p className="mb-3 text-sm text-mist">발표 시각이 되면 기록원이 시세에 충격을 넣고 시세판 아래와 디스코드에 문구를 띄웁니다. 발표 전에는 플레이어가 볼 수 없습니다.</p>
+        <PausedCoins />
         <div className="mb-3 flex flex-wrap gap-1">
-          <span className="text-xs text-mist">간부전 예고:</span>
+          <span className="text-xs text-mist">간부전 예고 (예고 + 새 진입 정지):</span>
           {COIN_IDS.filter((coin) => COINS[coin].districtId && COINS[coin].districtId !== "downtown").map((coin) => (
             <button key={coin} type="button" className="btn btn-dark btn-sm" disabled={districts.get(COINS[coin].districtId!)?.liberated} onClick={() => bossNotice(coin)}>{COINS[coin].place}</button>
           ))}
@@ -205,7 +212,7 @@ function NewsDesk() {
 
 const FIELD_LABELS: [keyof MarketConfig, string][] = [
   ["feeBps", "수수료"], ["minFee", "최소 수수료"], ["interestBps", "이자"], ["liquidationBps", "강제 청산"], ["capMultiple", "자동 익절"],
-  ["minMargin", "최소 증거금"], ["maxMargin", "최대 증거금"], ["maxOpen", "동시 포지션"], ["dailyLimit", "하루 새 거래"],
+  ["minMargin", "최소 증거금"], ["maxMargin", "최대 증거금"], ["maxOpen", "동시 포지션"], ["dailyLimit", "하루 새 거래"], ["spotDailyLimit", "하루 현물 매수"], ["spotMaxOrder", "현물 1회 최대"],
   ["nightFeeMultiplier", "밤 수수료 배수"], ["tickSeconds", "시세 간격(10~60초)"], ["staleSeconds", "시세 유효 시간(20초 이상)"],
 ];
 
@@ -241,7 +248,9 @@ function MarketEditor({ market }: { market: MarketConfig }) {
           <NumberField label="최소 증거금" value={draft.minMargin} onChange={(minMargin) => set({ minMargin })} min={1} suffix="코인" />
           <NumberField label="최대 증거금" value={draft.maxMargin} onChange={(maxMargin) => set({ maxMargin })} min={1} suffix="코인" />
           <NumberField label="동시 포지션" value={draft.maxOpen} onChange={(maxOpen) => set({ maxOpen })} min={1} />
-          <NumberField label="하루 새 거래" value={draft.dailyLimit} onChange={(dailyLimit) => set({ dailyLimit })} min={0} />
+          <NumberField label="하루 새 거래 (선물)" value={draft.dailyLimit} onChange={(dailyLimit) => set({ dailyLimit })} min={0} />
+          <NumberField label="하루 현물 매수" value={draft.spotDailyLimit} onChange={(spotDailyLimit) => set({ spotDailyLimit })} min={0} />
+          <NumberField label="현물 1회 최대 매수" value={draft.spotMaxOrder} onChange={(spotMaxOrder) => set({ spotMaxOrder })} min={1} suffix="코인" />
           <NumberField label="시세 간격 (초, 10~60)" value={draft.tickSeconds} onChange={(tickSeconds) => set({ tickSeconds })} min={10} max={60} />
           <NumberField label="시세 유효 시간 (초)" value={draft.staleSeconds} onChange={(staleSeconds) => set({ staleSeconds })} min={20} />
           <NumberField label="FTN 배율 (하우스 전)" value={draft.leverage.mainLocked} onChange={(mainLocked) => setLeverage({ mainLocked })} min={1} />
@@ -254,6 +263,7 @@ function MarketEditor({ market }: { market: MarketConfig }) {
           {COIN_IDS.map((coin) => (
             <div key={coin} className="rounded-sm border border-gold-400/20 p-2">
               <Toggle label={`${coin} 거래`} checked={draft.coins[coin].enabled} onChange={(enabled) => setDraft({ ...draft, coins: { ...draft.coins, [coin]: { ...draft.coins[coin], enabled } } })} hint="끄면 가격도 멈춥니다" />
+              <Toggle label="간부전 대기" checked={draft.coins[coin].paused} onChange={(paused) => setDraft({ ...draft, coins: { ...draft.coins, [coin]: { ...draft.coins[coin], paused } } })} hint="새 진입·매수만 정지, 해방 반영 시 자동 해제" />
               <NumberField label="변동성 ×" value={draft.coins[coin].volMult} step={0.1} onChange={(volMult) => setDraft({ ...draft, coins: { ...draft.coins, [coin]: { ...draft.coins[coin], volMult } } })} min={0} max={5} />
             </div>
           ))}
@@ -264,6 +274,66 @@ function MarketEditor({ market }: { market: MarketConfig }) {
           toast(fixed.length ? "info" : "success", fixed.length ? `저장했습니다. 허용 범위를 벗어난 값은 바꿔 저장했습니다: ${fixed.join(", ")}` : "저장했습니다.");
         })}>저장</button>
       </Frame>
+    </section>
+  );
+}
+
+/** Coins waiting on a 간부전: buys and new positions are stopped until liberation reaches the price. */
+function PausedCoins() {
+  const { session } = useDealer();
+  const config = useLiveDoc(refs.marketConfig(session.db), "dealer:market:config:paused");
+  const tick = useLatest();
+  const { busy, run } = useAction();
+  const market = config.status === "ready" && config.data ? normalizeMarket(config.data) : null;
+  const paused = market ? COIN_IDS.filter((coin) => entryPaused(market, coin, tick?.st.liberated ?? [])) : [];
+  if (paused.length === 0) return null;
+  return (
+    <div className="mb-3">
+      <Notice>
+        간부전 대기 (새 진입·매수 정지):{" "}
+        {paused.map((coin) => (
+          <span key={coin} className="mr-2 inline-flex items-center gap-1">
+            <b style={{ color: COINS[coin].accent }}>{COINS[coin].place}</b>
+            <button type="button" className="btn btn-dark btn-sm !min-h-0 !py-0.5" disabled={busy} onClick={() => void run(() => setCoinPaused(session, coin, false), `${coin} 정지를 풀었습니다.`)}>해제</button>
+          </span>
+        ))}
+      </Notice>
+    </div>
+  );
+}
+
+/** 현물 보유: what every player holds and what the vault would pay if they all sold now. */
+function Holdings() {
+  const { session, players } = useDealer();
+  const live = useLiveQuery(refs.holdings(session.db), "dealer:holdings");
+  const tick = useLatest();
+  const rows = live.status === "ready" ? live.data.filter((row) => row.data.units > 0) : [];
+  const names = new Map(players.map((row) => [row.id, row.data.name]));
+  const value = (units: number, coin: CoinId) => (tick ? holdingValue(units, tick.p[coin]) : 0);
+  const total = rows.reduce((sum, row) => sum + value(row.data.units, row.data.coin), 0);
+  const cost = rows.reduce((sum, row) => sum + row.data.cost, 0);
+  return (
+    <section>
+      <SectionTitle title="현물 보유" />
+      {rows.length === 0 ? <Empty>아무도 현물을 들고 있지 않습니다.</Empty> : (
+        <div className="deco-frame overflow-x-auto p-2">
+          <p className="mb-2 px-1 text-sm text-mist">지금 모두 판다면 금고에서 나갈 돈 <Coins value={total} /> · 산 값 <Coins value={cost} /></p>
+          <table className="table min-w-[32rem]">
+            <thead><tr><th>플레이어</th><th>종목</th><th className="text-right">수량</th><th className="text-right">산 값</th><th className="text-right">지금 가치</th></tr></thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td className="font-bold">{names.get(row.data.playerId) ?? row.data.playerId}</td>
+                  <td style={{ color: COINS[row.data.coin].accent }}>{row.data.coin}</td>
+                  <td className="text-right num">{formatUnits(row.data.units)}</td>
+                  <td className="text-right"><Coins value={row.data.cost} /></td>
+                  <td className="text-right"><Coins value={value(row.data.units, row.data.coin)} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

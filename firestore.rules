@@ -132,7 +132,7 @@ service cloud.firestore {
       allow create: if isAdmin() && request.resource.data == {
         'playerId': pid, 'balance': 0, 'debt': 0, 'seq': 0, 'arrived': false,
         'periodIndex': 0, 'workUsed': 0, 'gambleUsed': 0, 'openWager': null, 'room': null,
-        'market': {'period': 0, 'used': 0, 'open': 0}
+        'market': {'period': 0, 'used': 0, 'open': 0}, 'spot': {'period': 0, 'used': 0}
       };
       // 신원 확인은 장부 규칙이 한다(장부는 본인 또는 관리자만 만들 수 있다).
       allow update: if signedIn() && (ledgerBacked(pid) || (isPlayer(pid) && wagerStep()));
@@ -217,6 +217,8 @@ service cloud.firestore {
         || (e.type == 'pvpPayout' && pvpPayoutOk(entryId, e, before, after))
         || (e.type == 'marketOpen' && marketOpenOk(entryId, e, before, after))
         || (e.type == 'marketClose' && marketCloseOk(entryId, e, before, after))
+        || (e.type == 'spotBuy' && spotBuyOk(entryId, e, before, after))
+        || (e.type == 'spotSell' && spotSellOk(entryId, e, before, after))
       );
     }
 
@@ -807,7 +809,7 @@ service cloud.firestore {
         && (d.side == 'long' || d.side == 'short')
         && d.leverage is int && d.leverage in m.leverage.steps && d.leverage <= maxLeverage(m, d.coin, econ)
         && d.margin is int && d.margin >= m.minMargin && d.margin <= m.maxMargin
-        && tickOk(d.hour, d.seq, tick, m) && d.entry == tick.p[d.coin]
+        && tickOk(d.hour, d.seq, tick, m) && d.entry == tick.p[d.coin] && entryOpen(m, d.coin, tick)
         && feeOk(d.fee, notional, m)
         && e.delta == -(d.margin + d.fee) && e.debtDelta == 0 && e.vaultDelta == d.margin + d.fee
         && after.market == {'period': period, 'used': used, 'open': c0.open + 1}
@@ -882,6 +884,80 @@ service cloud.firestore {
         && isBpsFloor(d.interest, (notional - p0.margin) * d.hours, m.interestBps)
         && d.fee == p0.fee * (night ? m.nightFeeMultiplier : 1)
         && d.payout == (raw > 0 ? raw : 0);
+    }
+
+    // 간부전 예고 뒤에는 그 종목의 새 진입·매수를 막는다. 해방이 시세에 반영되면(틱의 liberated) 다시 열린다.
+    // 종목 → 구역은 packages/core/src/market/coins.ts와 같다.
+    function coinDistrict(coin) {
+      return {'FTN': '', 'WHL': 'downtown', 'HBT': 'modern', 'LNH': 'medieval', 'JWN': 'wuxia', 'S9': 'cyberpunk', 'ORB': 'scifi', 'BLC': 'romance', 'MWL': 'horror'}[coin];
+    }
+    function entryOpen(m, coin, tick) {
+      return m.coins[coin].get('paused', false) != true || coinDistrict(coin) in tick.st.liberated;
+    }
+
+    // ── 현물 ── 보유량은 1/10000개 단위(units), 가격은 1/100 단위. 금액 = units × 가격 / 1,000,000.
+    function holdingPath(pid, coin) { return /databases/$(database)/documents/holdings/$(pid + '_' + coin); }
+
+    match /holdings/{id} {
+      // get은 아직 없는 문서(첫 매수 전)도 허용해야 하므로 문서 id로 판단한다.
+      allow get: if isAdmin() || isOracle() || (signedIn() && exists(bindingPath()) && id.matches(myPid() + '_[A-Z0-9]+') && isPlayer(myPid()));
+      allow list: if isAdmin() || isOracle()
+        || (signedIn() && exists(bindingPath()) && resource.data.playerId == myPid() && isPlayer(myPid()));
+      allow create: if signedIn() && holdingOk(id, null, request.resource.data);
+      allow update: if signedIn() && holdingOk(id, resource.data, request.resource.data);
+      allow delete: if false;
+    }
+
+    // 보유 문서는 함께 만들어지는 현물 장부가 말하는 만큼만 바뀐다. 금액 계산은 장부 규칙이 한다.
+    function holdingOk(id, h0, h1) {
+      let e = getAfter(ledgerPath(h1.lastLedger)).data;
+      let d = e.detail;
+      let units0 = h0 == null ? 0 : h0.units;
+      let cost0 = h0 == null ? 0 : h0.cost;
+      return h1.lastLedger is string && ledgerCreatedNow(h1.lastLedger)
+        && id == e.playerId + '_' + d.coin
+        && h1.keys().hasOnly(['playerId', 'coin', 'units', 'cost', 'lastLedger'])
+        && h1.playerId == e.playerId && h1.coin == d.coin
+        && ((e.type == 'spotBuy' && h1.units == units0 + d.units && h1.cost == cost0 + d.amount)
+            || (e.type == 'spotSell' && h1.units == units0 - d.units && h1.cost == cost0 - d.costOut));
+    }
+
+    function spotBuyOk(entryId, e, before, after) {
+      let d = e.detail;
+      let m = marketConfig();
+      let econ = get(configPath()).data;
+      let tick = get(marketPath(d.hour)).data.last;
+      let s0 = before.get('spot', {'period': -1, 'used': 0});
+      let period = curPeriod(econ.get('limitPeriod', 'day'));
+      let used = (s0.period == period ? s0.used : 0) + 1;
+      return d.keys().hasOnly(['coin', 'amount', 'fee', 'price', 'units', 'hour', 'seq'])
+        && m.enabled == true && m.coins[d.coin].enabled == true
+        && d.amount is int && d.amount >= m.minMargin && d.amount <= m.get('spotMaxOrder', 2000)
+        && tickOk(d.hour, d.seq, tick, m) && d.price == tick.p[d.coin] && entryOpen(m, d.coin, tick)
+        && feeOk(d.fee, d.amount, m)
+        && isFloor(d.units, d.amount * 1000000, d.price) && d.units >= 1
+        && e.delta == -(d.amount + d.fee) && e.debtDelta == 0 && e.vaultDelta == d.amount + d.fee
+        && after.spot == {'period': period, 'used': used} && used <= m.get('spotDailyLimit', 20)
+        && onlyChanged(before, after, ['balance', 'seq', 'spot'])
+        && getAfter(holdingPath(e.playerId, d.coin)).data.lastLedger == entryId;
+    }
+
+    // 매도는 횟수를 세지 않고, 거래 정지·간부전 대기 중에도 된다.
+    function spotSellOk(entryId, e, before, after) {
+      let d = e.detail;
+      let m = marketConfig();
+      let tick = get(marketPath(d.hour)).data.last;
+      let h0 = get(holdingPath(e.playerId, d.coin)).data;
+      return d.keys().hasOnly(['coin', 'units', 'price', 'gross', 'fee', 'payout', 'costOut', 'hour', 'seq'])
+        && tickOk(d.hour, d.seq, tick, m) && d.price == tick.p[d.coin]
+        && d.units is int && d.units >= 1 && d.units <= h0.units
+        && isFloor(d.gross, d.units * d.price, 1000000)
+        && feeOk(d.fee, d.gross, m)
+        && d.payout == (d.gross - d.fee > 0 ? d.gross - d.fee : 0)
+        && (d.units == h0.units ? d.costOut == h0.cost : isFloor(d.costOut, h0.cost * d.units, h0.units))
+        && e.delta == d.payout && e.debtDelta == 0 && e.vaultDelta == -d.payout
+        && onlyChanged(before, after, ['balance', 'seq'])
+        && getAfter(holdingPath(e.playerId, d.coin)).data.lastLedger == entryId;
     }
 
     // ── 디스코드 알림 ──

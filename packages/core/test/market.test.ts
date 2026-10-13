@@ -23,7 +23,7 @@ describe("market config", () => {
   it("fills defaults and caps leverage by house state", () => {
     const config = normalizeMarket({ feeBps: 25, coins: { MWL: { enabled: false } } });
     expect(config.feeBps).toBe(25);
-    expect(config.coins.MWL).toEqual({ enabled: false, volMult: 1 });
+    expect(config.coins.MWL).toEqual({ enabled: false, volMult: 1, paused: false });
     expect(config.leverage.steps).toEqual([1, 2, 3, 5, 10, 20]);
     expect(maxLeverage(config, "FTN", false)).toBe(5);
     expect(maxLeverage(config, "HBT", false)).toBe(3);

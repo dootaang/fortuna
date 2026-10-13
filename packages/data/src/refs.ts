@@ -105,6 +105,9 @@ export interface PositionDoc {
   lastLedger: string;
 }
 
+/** holdings/{pid}_{coin}: spot coins owned, in 1/10,000 units, and the coins paid for them. */
+export interface HoldingDoc { playerId: string; coin: CoinId; units: number; cost: number; lastLedger: string; }
+
 /** marketFeed/{seq_i}: lines under the board, written by the price recorder. */
 export interface FeedDoc { kind: string; coin: CoinId | null; tone: FeedTone; text: string; seq: number; at: Timestamp; }
 
@@ -166,5 +169,7 @@ export const refs = {
   position: (db: Firestore, id: string) => typed<PositionDoc>(doc(db, "positions", id)),
   positions: (db: Firestore) => typedCollection<PositionDoc>(collection(db, "positions")),
   oracle: (db: Firestore, uid: string) => doc(db, "oracles", uid),
+  holding: (db: Firestore, pid: string, coin: CoinId) => typed<HoldingDoc>(doc(db, "holdings", `${pid}_${coin}`)),
+  holdings: (db: Firestore) => typedCollection<HoldingDoc>(collection(db, "holdings")),
   oracles: (db: Firestore) => collection(db, "oracles"),
 };

@@ -22,6 +22,10 @@ export interface MarketConfig {
   maxOpen: number;
   /** New positions per limit period (config/economy limitPeriod). */
   dailyLimit: number;
+  /** Spot buys per limit period; sells are not counted. */
+  spotDailyLimit: number;
+  /** Largest single spot buy, in coins (minimum is minMargin). */
+  spotMaxOrder: number;
   leverage: {
     steps: number[];
     /** Before the house opens. */
@@ -39,8 +43,11 @@ export interface MarketConfig {
   staleSeconds: number;
   /** Seconds between prices (10–60); the price recorder reads it within a minute. */
   tickSeconds: number;
-  /** Per coin: trading switch (circuit breaker) and a volatility multiplier. */
-  coins: Record<CoinId, { enabled: boolean; volMult: number }>;
+  /**
+   * Per coin: trading switch (circuit breaker, also freezes the price), volatility multiplier, and
+   * `paused` — new entries and buys stop after a 간부전 예고 until the district's liberation reaches the price.
+   */
+  coins: Record<CoinId, { enabled: boolean; volMult: number; paused: boolean }>;
 }
 
 export const DEFAULT_MARKET: MarketConfig = {
@@ -54,12 +61,14 @@ export const DEFAULT_MARKET: MarketConfig = {
   maxMargin: 2_000,
   maxOpen: 3,
   dailyLimit: 10,
+  spotDailyLimit: 20,
+  spotMaxOrder: 2_000,
   leverage: { steps: [1, 2, 3, 5, 10, 20], mainLocked: 5, altLocked: 3, mainOpen: 20, altOpen: 10 },
   nightFeeMultiplier: 2,
   debtLink: true,
   staleSeconds: 90,
   tickSeconds: 15,
-  coins: Object.fromEntries(COIN_IDS.map((id) => [id, { enabled: true, volMult: 1 }])) as MarketConfig["coins"],
+  coins: Object.fromEntries(COIN_IDS.map((id) => [id, { enabled: true, volMult: 1, paused: false }])) as MarketConfig["coins"],
 };
 
 const int = (value: unknown, fallback: number, min = 0, max = 1e9) => Math.round(numberOr(value, fallback, min, max));
@@ -82,6 +91,8 @@ export function normalizeMarket(raw: unknown): MarketConfig {
     maxMargin: int(source.maxMargin, d.maxMargin, 1),
     maxOpen: int(source.maxOpen, d.maxOpen, 1, 20),
     dailyLimit: int(source.dailyLimit, d.dailyLimit, 0, 1_000),
+    spotDailyLimit: int(source.spotDailyLimit, d.spotDailyLimit, 0, 1_000),
+    spotMaxOrder: int(source.spotMaxOrder, d.spotMaxOrder, 1),
     leverage: {
       steps,
       mainLocked: int(leverage.mainLocked, d.leverage.mainLocked, 1, 100), altLocked: int(leverage.altLocked, d.leverage.altLocked, 1, 100),
@@ -93,7 +104,7 @@ export function normalizeMarket(raw: unknown): MarketConfig {
     tickSeconds: int(source.tickSeconds, d.tickSeconds, 10, 60),
     coins: Object.fromEntries(COIN_IDS.map((id) => {
       const stored = isRecord(coins[id]) ? coins[id] : {};
-      return [id, { enabled: bool(stored.enabled, true), volMult: numberOr(stored.volMult, 1, 0, 5) }];
+      return [id, { enabled: bool(stored.enabled, true), volMult: numberOr(stored.volMult, 1, 0, 5), paused: bool(stored.paused, false) }];
     })) as MarketConfig["coins"],
   };
 }
@@ -107,4 +118,14 @@ export function maxLeverage(config: MarketConfig, coin: CoinId, houseOpen: boole
 export function leverageChoices(config: MarketConfig, coin: CoinId, houseOpen: boolean): number[] {
   const cap = maxLeverage(config, coin, houseOpen);
   return config.leverage.steps.filter((step) => step <= cap);
+}
+
+/**
+ * New entries (futures) and buys (spot) are stopped while a 간부전 is announced, so nobody can
+ * buy ahead of a liberation rally they will cause; they reopen once the rally is in the price
+ * (the district shows up in the tick's liberated list) or when the dealer lifts the pause.
+ */
+export function entryPaused(config: MarketConfig, coin: CoinId, liberated: readonly string[]): boolean {
+  const district = COINS[coin].districtId;
+  return config.coins[coin].paused && !(district !== null && liberated.includes(district));
 }

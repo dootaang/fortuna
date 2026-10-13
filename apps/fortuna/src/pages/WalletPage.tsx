@@ -7,6 +7,7 @@ import { useLiveQuery, type Row } from "../session/live.ts";
 import { Coins, Empty, Frame, Modal, NumberField, PageTitle, Stat, cx, formatDate, useAction } from "../ui/kit.tsx";
 import { relay } from "../relay.ts";
 import { FundsSection } from "./Funds.tsx";
+import { HoldingsList } from "../market/HoldingsList.tsx";
 
 export default function WalletPage() {
   const { wallet, config, session, player } = usePlayer();
@@ -22,6 +23,7 @@ export default function WalletPage() {
           <Stat label={TEXT.wallet.gambleLeft}><span className="num">{usesLeft(wallet, config, "gamble", now)}</span></Stat>
         </div>
       </Frame>
+      <HoldingsList />
       <Repay />
       <JointWallet />
       <FundsSection />
@@ -141,6 +143,8 @@ export function describeEntry(entry: LedgerEntry<Timestamp>): string {
       const kind = ({ close: "청산", cap: "자동 익절", liquidated: "강제 청산", refund: "무효 환불" } as Record<string, string>)[detail.kind] ?? "정산";
       return `${detail.coin} ${detail.side === "short" ? "숏" : "롱"} ${detail.leverage}배 ${kind}${detail.kind === "close" || detail.kind === "cap" ? ` · 손익 ${detail.pnl} · 이자 ${detail.interest} · 수수료 ${detail.fee}` : ""}`;
     }
+    case "spotBuy": return `${detail.coin} ${(detail.units / 10_000).toFixed(4)}개 매수 · 가격 ${(detail.price / 100).toFixed(2)} · 수수료 ${detail.fee}`;
+    case "spotSell": return `${detail.coin} ${(detail.units / 10_000).toFixed(4)}개 매도 · 가격 ${(detail.price / 100).toFixed(2)} · 손익 ${detail.payout - detail.costOut}`;
     default: return "";
   }
 }

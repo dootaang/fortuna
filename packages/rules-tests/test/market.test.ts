@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getAuth } from "firebase/auth";
 import { deleteField, doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
-import { DEFAULT_MARKET, normalizeEconomy, quoteClose, quoteOpen, type CoinId } from "@fortuna/core";
+import { DEFAULT_MARKET, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, type CoinId } from "@fortuna/core";
 import {
-  arrive, closePosition, openPosition, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
+  announceBossFight, arrive, buySpot, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
   type PlayerSession, type Session,
 } from "@fortuna/data";
 import { FirestoreRest } from "../../../apps/notifier/src/firestore-rest.ts";
@@ -152,7 +152,7 @@ describe("positions", () => {
     await rawOpen(player, "FTN", 20, 100);
     await saveMarket(admin, { ...DEFAULT_MARKET, maxOpen: 1 });
     await denied(rawOpen(player, "FTN", 5, 100));
-    await saveMarket(admin, { ...DEFAULT_MARKET, coins: { ...DEFAULT_MARKET.coins, ORB: { enabled: false, volMult: 1 } } });
+    await saveMarket(admin, { ...DEFAULT_MARKET, coins: { ...DEFAULT_MARKET.coins, ORB: { enabled: false, volMult: 1, paused: false } } });
     await denied(rawOpen(player, "ORB", 3, 100));
     const hour = Math.floor(clockMs / 3_600_000);
     await asRoot((root) => root.doc(`market/h${hour}`).update({ "last.at": new Date(Date.now() - 120_000) }));
@@ -205,5 +205,60 @@ describe("positions", () => {
     await denied(getDoc(refs.position(stranger.db, positionId)));
     await denied(updateDoc(refs.position(oracle.db, positionId), { status: "liquidated", exit: 1, exitSeq: 1, exitAt: serverTimestamp() }));
     await denied(updateDoc(refs.position(oracle.db, positionId), { margin: 1 }));
+  });
+});
+
+describe("spot", () => {
+  it("buys and sells at the newest price with the holding and money in step", async () => {
+    const vault0 = (await rootData("vault/main"))!.amount;
+    const bought = await buySpot(player, "LNH", 300);
+    const price = bought.quote.price;
+    expect(bought.quote).toEqual(quoteBuy(DEFAULT_MARKET, 300, price));
+    expect(await rootData(`holdings/${player.pid}_LNH`)).toMatchObject({ units: bought.quote.units, cost: 300 });
+    expect((await rootData(`wallets/${player.pid}`))!.balance).toBe(900 - bought.quote.cost);
+    await tick();
+    const half = Math.floor(bought.quote.units / 2);
+    const sold = await sellSpot(player, "LNH", half);
+    const nowPrice = (await rootData(`market/h${Math.floor(clockMs / 3_600_000)}`))!.last.p.LNH;
+    expect(sold.quote).toEqual(quoteSell(DEFAULT_MARKET, half, nowPrice, { units: bought.quote.units, cost: 300 }));
+    expect(await rootData(`holdings/${player.pid}_LNH`)).toMatchObject({ units: bought.quote.units - half, cost: 300 - sold.quote.costOut });
+    const rest = await sellSpot(player, "LNH", bought.quote.units - half);
+    expect(await rootData(`holdings/${player.pid}_LNH`)).toMatchObject({ units: 0, cost: 0 });
+    expect((await rootData("vault/main"))!.amount).toBe(vault0 + bought.quote.cost - sold.quote.payout - rest.quote.payout);
+    expect((await rootData(`wallets/${player.pid}`))?.spot).toMatchObject({ used: 1 });
+  });
+
+  it("refuses a forged holding, a wrong price and selling what is not owned", async () => {
+    await buySpot(player, "ORB", 100);
+    const held = (await rootData(`holdings/${player.pid}_ORB`))! as { units: number; cost: number };
+    await denied(updateDoc(refs.holding(player.db, player.pid, "ORB"), { units: held.units * 10 }));
+    await expect(sellSpot(player, "ORB", held.units + 1)).rejects.toMatchObject({ code: "units" });
+    await denied(runTransaction(player.db, async (tx) => {
+      const wallet = await readWallet(tx, player), { hour, tick: last } = await readLatestTick(tx, player.db, Date.now());
+      const quote = quoteSell(DEFAULT_MARKET, held.units, last.p.ORB * 2, held);
+      const id = writeEntry(tx, player, player.pid, wallet, {
+        type: "spotSell", actor: "player", delta: quote.payout, vaultDelta: -quote.payout,
+        detail: { coin: "ORB", units: held.units, price: last.p.ORB * 2, gross: quote.gross, fee: quote.fee, payout: quote.payout, costOut: quote.costOut, hour, seq: last.seq },
+      });
+      tx.set(refs.holding(player.db, player.pid, "ORB"), { playerId: player.pid, coin: "ORB", units: 0, cost: 0, lastLedger: id });
+    }));
+  });
+
+  it("pauses buys and new positions on a 간부전 coin until its liberation reaches the price", async () => {
+    await buySpot(player, "JWN", 100);
+    await announceBossFight(admin, "JWN");
+    await expect(buySpot(player, "JWN", 100)).rejects.toMatchObject({ code: "coin-paused" });
+    await denied(rawOpen(player, "JWN", 2, 100));
+    const held = (await rootData(`holdings/${player.pid}_JWN`))!;
+    await sellSpot(player, "JWN", held.units); // selling stays open
+    await buySpot(player, "LNH", 100); // other coins unaffected
+    await setDistrict(admin, "wuxia", { liberated: true, deductionBps: 0 }, "천마 격파");
+    const rest = await oracleRest(oracle);
+    const { observeWorld } = await import("../../../apps/notifier/src/oracle.ts");
+    await tick({ world: await observeWorld(rest, clockMs + 15_000) });
+    await buySpot(player, "JWN", 100);
+    await announceBossFight(admin, "LNH");
+    await setCoinPaused(admin, "LNH", false); // the fight was called off
+    await buySpot(player, "LNH", 100);
   });
 });
