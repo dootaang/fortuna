@@ -6,7 +6,7 @@ import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
 import { wait } from "../fx/settings.ts";
 import { Coins, Frame, Modal, Notice, cx, formatDate, useAction } from "../ui/kit.tsx";
-import { PriceChart, type ChartFlag, type ChartLine } from "./PriceChart.tsx";
+import { ChartBoundary, PriceChart, type ChartFlag, type ChartLine } from "./PriceChart.tsx";
 import { PositionCard } from "./Positions.tsx";
 import { CoinBadge, FlapText, changeText, priceText } from "./pieces.tsx";
 import { directionOf, openingPrice, useCountdown, useFeed, useMarketConfig, useMyPositions, useTape } from "./useMarket.ts";
@@ -64,7 +64,9 @@ function CoinView({ coin }: { coin: CoinId }) {
             <button key={frame.minutes} type="button" role="tab" aria-selected={minutes === frame.minutes} className={cx("btn btn-sm", minutes === frame.minutes ? "btn-gold" : "btn-dark")} onClick={() => setMinutes(frame.minutes)}>{frame.label}</button>
           ))}
         </div>
-        <PriceChart hours={tape.hours} coin={coin} minutes={minutes} lines={lines} flags={flags} accent={def.accent} />
+        <ChartBoundary resetKey={`${coin}:${minutes}`}>
+          <PriceChart hours={tape.hours} coin={coin} minutes={minutes} lines={lines} flags={flags} accent={def.accent} />
+        </ChartBoundary>
       </Frame>
 
       {positions.length > 0 && (

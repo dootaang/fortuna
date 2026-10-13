@@ -35,6 +35,13 @@ test("exchange: board, chart, leveraged long with the loan slip, close", async (
   await expect(page.getByRole("heading", { name: "포르투나 코인" })).toBeVisible();
   await expect(page.getByRole("img", { name: /FTN 가격 차트/ })).toBeVisible();
 
+  // Every timeframe keeps updating as ticks arrive (a chart update error used to crash the page).
+  for (const frame of ["1분", "5분", "15분", "1시간", "1분"]) {
+    await page.getByRole("tab", { name: frame, exact: true }).click();
+    await page.waitForTimeout(2_500);
+    await expect(page.getByRole("heading", { name: "포르투나 코인" })).toBeVisible();
+  }
+
   await page.getByLabel("증거금 (코인)").fill("100");
   await page.getByRole("button", { name: "5배", exact: true }).click();
   await page.screenshot({ path: "test-results/shots/31-market-coin.png", fullPage: true, animations: "disabled" });

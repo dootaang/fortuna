@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CandlestickSeries, ColorType, CrosshairMode, LineStyle, createChart, createSeriesMarkers,
   type CandlestickData, type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
@@ -29,6 +29,9 @@ export function PriceChart({ hours, coin, minutes, lines, flags, accent }: {
   const markers = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLines = useRef<IPriceLine[]>([]);
   const shown = useRef<string>("");
+  const lastTime = useRef<number>(0);
+  const times = useRef<number[]>([]);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     if (!box.current) return undefined;
@@ -47,24 +50,30 @@ export function PriceChart({ hours, coin, minutes, lines, flags, accent }: {
     });
     markers.current = createSeriesMarkers(series.current, []);
     chart.current = created;
-    return () => { created.remove(); chart.current = null; series.current = null; markers.current = null; priceLines.current = []; shown.current = ""; };
+    return () => { created.remove(); chart.current = null; series.current = null; markers.current = null; priceLines.current = []; shown.current = ""; lastTime.current = 0; };
   }, []);
 
-  // Candles: replace on coin/timeframe change, otherwise update the last bar so the chart keeps its scroll.
+  // Candles: replace on coin/timeframe change; on a new tick only touch bars from the last shown one on,
+  // because the library refuses to update anything older than its newest bar.
   useEffect(() => {
     const target = series.current;
     if (!target) return;
     const bars = barsFor(hours, coin, minutes).map((bar) => ({ ...bar, time: (bar.time + KST_SECONDS) as UTCTimestamp })) as CandlestickData<UTCTimestamp>[];
     const key = `${coin}:${minutes}`;
-    if (shown.current !== key || bars.length < 2) {
+    try {
+      if (shown.current !== key) {
+        target.setData(bars);
+        shown.current = key;
+        chart.current?.timeScale().scrollToRealTime();
+      } else {
+        for (const bar of bars) if (bar.time >= lastTime.current) target.update(bar);
+      }
+    } catch {
       target.setData(bars);
-      shown.current = key;
-      chart.current?.timeScale().scrollToRealTime();
-    } else {
-      const last = bars.at(-1), before = bars.at(-2);
-      if (before) target.update(before);
-      if (last) target.update(last);
     }
+    lastTime.current = bars.at(-1)?.time ?? 0;
+    times.current = bars.map((bar) => bar.time);
+    setRevision((value) => value + 1);
   }, [hours, coin, minutes]);
 
   useEffect(() => {
@@ -74,13 +83,32 @@ export function PriceChart({ hours, coin, minutes, lines, flags, accent }: {
     priceLines.current = lines.map((line) => target.createPriceLine({ price: line.price / 100, color: line.color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: line.title }));
   }, [JSON.stringify(lines)]);
 
+  // Flags sit on the bar they happened in; flags outside the loaded bars are left out.
   useEffect(() => {
-    const bucket = minutes * 60;
-    const items: SeriesMarker<Time>[] = flags
-      .map((flag) => ({ time: (Math.floor(flag.atMs / 1000 / bucket) * bucket + KST_SECONDS) as UTCTimestamp, position: "aboveBar" as const, color: TONE_COLOR[flag.tone], shape: "circle" as const, text: "" }))
-      .sort((a, b) => a.time - b.time);
-    markers.current?.setMarkers(items);
-  }, [JSON.stringify(flags), minutes]);
+    const bucket = minutes * 60, shownTimes = new Set(times.current);
+    const items: SeriesMarker<Time>[] = [...new Set(flags.map((flag) => Math.floor(flag.atMs / 1000 / bucket) * bucket + KST_SECONDS))]
+      .filter((time) => shownTimes.has(time))
+      .sort((a, b) => a - b)
+      .map((time) => {
+        const flag = flags.find((entry) => Math.floor(entry.atMs / 1000 / bucket) * bucket + KST_SECONDS === time)!;
+        return { time: time as UTCTimestamp, position: "aboveBar" as const, color: TONE_COLOR[flag.tone], shape: "circle" as const, text: "" };
+      });
+    try { markers.current?.setMarkers(items); } catch { /* a flag the chart cannot place is not worth a crash */ }
+  }, [JSON.stringify(flags), minutes, revision]);
 
   return <div ref={box} className="h-64 w-full sm:h-80" role="img" aria-label={`${coin} 가격 차트, ${minutes}분 봉. 최근가 ${formatPrice(hours.at(-1)?.last.p[coin] ?? 0)}`} />;
+}
+
+/** A chart failure shows a note instead of taking the whole page down. */
+export class ChartBoundary extends Component<{ children: ReactNode; resetKey: string }, { failed: string | null }> {
+  override state: { failed: string | null } = { failed: null };
+  static getDerivedStateFromError(): { failed: string } { return { failed: "failed" }; }
+  override componentDidUpdate(previous: { resetKey: string }) {
+    if (previous.resetKey !== this.props.resetKey && this.state.failed) this.setState({ failed: null });
+  }
+  override render() {
+    return this.state.failed
+      ? <p className="grid h-64 place-items-center text-sm text-mist sm:h-80">차트를 그리지 못했습니다. 봉 단위를 바꾸거나 새로고침해 주세요.</p>
+      : this.props.children;
+  }
 }
