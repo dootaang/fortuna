@@ -49,7 +49,7 @@
 
 플레이어는 도박장 › **거래소**에서 아홉 종목(FTN과 구역 코인)에 롱·숏을 겁니다. 설계는 [SPEC-COIN-MARKET.md](./SPEC-COIN-MARKET.md).
 
-- **처음 한 번**: 시세는 Cloudflare Worker(디스코드 알림과 같은 Worker)가 1분마다 깨어나 15초 간격으로 찍습니다.
+- **처음 한 번**: 시세는 Cloudflare Worker(디스코드 알림과 같은 Worker)의 Durable Object 알람이 15초마다 한 틱씩 찍습니다. 1분 크론은 알람이 멈췄으면 다시 겁니다.
   1. `node scripts/create-oracle.mjs` — 기록원 전용 계정을 만들고 Worker 비밀값(ORACLE_REFRESH_TOKEN, MARKET_SECRET)을 등록한 뒤 **UID를 출력**합니다.
   2. `corepack pnpm --filter @fortuna/notifier exec wrangler deploy`
   3. 딜러 화면 › **거래소** › 기록원 UID 등록에 1번의 UID를 붙여 넣습니다. 1~2분 안에 "정상"이 뜹니다.
@@ -96,4 +96,4 @@
 
 Spark 요금제: Firestore 하루 읽기 5만, 쓰기 2만. 5명이 하루 한도(일 10회 + 도박 30판, 판마다 쓰기 2~6회)를 꽉 채워도 하루 쓰기 1,000회 안팎입니다.
 거래소 시세 기록원은 하루 쓰기 약 5,800회, 읽기 약 1만 회를 씁니다(15초 간격 기준). 빠듯하면 거래소 설정의 시세 간격을 20~30초로 늘리십시오.
-Cloudflare Workers 무료 요금제는 호출당 CPU 10ms 제한이 있습니다. 시세가 자꾸 멈추면 같은 방법으로 간격을 늘리면 됩니다.
+시세 한 틱은 CPU 2~6ms, 읽기 2~3회 정도입니다(설정·소식은 1분, 도시 상황은 10분마다 다시 읽음).

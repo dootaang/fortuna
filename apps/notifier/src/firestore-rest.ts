@@ -101,7 +101,7 @@ export class FirestoreRest {
       aggregations: [{ alias: "n", count: {} }],
     };
     const response = await fetch(`${this.base}:runAggregationQuery`, { method: "POST", headers: this.headers(), body: JSON.stringify({ structuredAggregationQuery }) });
-    if (!response.ok) throw new Error(`firestore_count_${response.status}`);
+    if (!response.ok) throw new Error(`firestore_count_${response.status}: ${(await response.text()).slice(0, 300)}`);
     const rows = (await response.json()) as { result?: { aggregateFields?: { n?: Value } } }[];
     const n = rows[0]?.result?.aggregateFields?.n;
     return n ? Number(decode(n)) : 0;

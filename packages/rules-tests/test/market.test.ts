@@ -7,7 +7,7 @@ import {
   type PlayerSession, type Session,
 } from "@fortuna/data";
 import { FirestoreRest } from "../../../apps/notifier/src/firestore-rest.ts";
-import { loadRecorder, recordTick, type Recorder } from "../../../apps/notifier/src/oracle.ts";
+import { TickRunner, loadRecorder, nextTickAt, recordTick, type Recorder } from "../../../apps/notifier/src/oracle.ts";
 import { anonymousSession, asRoot, cityWithPlayer, closeAll, resetData, rootData } from "./harness.ts";
 
 const denied = async (promise: Promise<unknown>) => { await expect(promise).rejects.toMatchObject({ code: "permission-denied" }); };
@@ -78,6 +78,33 @@ describe("price recorder", () => {
     expect(second.feed.find((item) => item.kind === "news")?.text).toBe("마왕성 창문의 불이 꺼졌다.");
     expect((await rootData(`marketNews/${id}`))?.status).toBe("published");
     expect((await getDoc(doc(player.db, "marketFeed", `${second.seq}_0`))).exists()).toBe(true);
+  });
+});
+
+describe("market clock", () => {
+  it("writes one tick per wake-up with a refreshed oracle token", async () => {
+    const authHost = `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST ?? "127.0.0.1:9099"}`;
+    const runner = new TickRunner({
+      FIREBASE_PROJECT_ID: "demo-fortuna", FIREBASE_API_KEY: "demo-key", ORACLE_REFRESH_TOKEN: getAuth(oracle.db.app).currentUser!.refreshToken,
+      MARKET_SECRET: "secret", DISCORD_WEBHOOK_URL: "", FIRESTORE_HOST: host, AUTH_HOST: authHost,
+    });
+    const first = await runner.run(clockMs + 15_000 + 2_000);
+    const second = await runner.run(clockMs + 30_000 + 400);
+    const again = await runner.run(clockMs + 30_000 + 9_000);
+    // An evicted Durable Object comes back from its snapshot and carries on.
+    const revived = new TickRunner({
+      FIREBASE_PROJECT_ID: "demo-fortuna", FIREBASE_API_KEY: "demo-key", ORACLE_REFRESH_TOKEN: "unused-after-restore",
+      MARKET_SECRET: "secret", DISCORD_WEBHOOK_URL: "", FIRESTORE_HOST: host, AUTH_HOST: authHost,
+    });
+    revived.restore(JSON.parse(JSON.stringify(runner.snapshot())), clockMs + 45_000);
+    const third = await revived.run(clockMs + 45_000 + 300);
+    expect(third?.status).toBe("written");
+    expect(third!.seq).toBe(second!.seq + 1);
+    expect(first?.status).toBe("written");
+    expect(second?.status).toBe("written");
+    expect(second!.seq).toBe(first!.seq + 1);
+    expect(again?.status).toBe("skipped");
+    expect(nextTickAt(clockMs + 30_400, 15_000)).toBe(clockMs + 45_300);
   });
 });
 

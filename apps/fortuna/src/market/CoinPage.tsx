@@ -53,7 +53,7 @@ function CoinView({ coin }: { coin: CoinId }) {
         </div>
         <div className="text-right">
           <span key={tick?.seq} className={cx("inline-block rounded-sm px-1 text-xl", direction > 0 && "tick-up", direction < 0 && "tick-down")}><FlapText text={priceText(price)} /></span>
-          <p className={cx("num text-xs", `tone-${change.tone}`)}>{change.text} · 다음 {left}초</p>
+          <p className={cx("num text-xs", `tone-${change.tone}`)}>{change.text} · {left > 0 ? `다음 ${left}초` : "갱신 중…"}</p>
         </div>
       </header>
       <p className="mb-3 text-sm text-mist">{def.trait}</p>

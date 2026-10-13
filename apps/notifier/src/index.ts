@@ -1,8 +1,14 @@
 import { formatNotification, normalizeNotify, type NotifyEvent } from "@fortuna/core";
 import { FirestoreRest } from "./firestore-rest.ts";
-import { runMinute, type RecorderEnv } from "./oracle.ts";
+import { MarketClock, type RecorderEnv } from "./oracle.ts";
+
+export { MarketClock };
+
+interface ClockNamespace { idFromName(name: string): unknown; get(id: unknown): { fetch(url: string): Promise<Response> }; }
 
 export interface Env extends Partial<RecorderEnv> {
+  /** Durable Object namespace of the market clock (wrangler.toml). */
+  CLOCK?: ClockNamespace;
   FIREBASE_PROJECT_ID: string;
   ALLOWED_ORIGINS: string;
   DISCORD_WEBHOOK_URL: string;
@@ -71,9 +77,10 @@ export async function relay(eventId: string, idToken: string, env: Env, post: ty
 }
 
 export default {
-  /** 시세 기록원: every minute, the ticks of that minute (see oracle.ts). */
-  async scheduled(controller: { scheduledTime: number }, env: Env, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
-    ctx.waitUntil(runMinute(env as RecorderEnv, controller.scheduledTime).catch((error) => console.error("recorder", error)));
+  /** Every minute: make sure the market clock (a Durable Object alarm, every 15 s) is running. */
+  async scheduled(_controller: { scheduledTime: number }, env: Env, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
+    if (!env.CLOCK) return;
+    ctx.waitUntil(env.CLOCK.get(env.CLOCK.idFromName("market")).fetch("https://clock/arm").catch((error) => console.error("arm", error)));
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {

@@ -51,7 +51,7 @@ export default function MarketPage() {
             <div className="mb-2 flex items-center justify-between gap-2 px-1">
               <p className="deco-caps">Departures · 시세</p>
               <div className="flex items-center gap-2 text-xs text-mist">
-                {stale ? <span className="text-[#f2b3aa]">시세 기록원 대기 중</span> : <span>다음 시세 <span className="num text-gold-200">{left}</span>초</span>}
+                {stale ? <span className="text-[#f2b3aa]">시세 기록원 대기 중</span> : left > 0 ? <span>다음 시세 <span className="num text-gold-200">{left}</span>초</span> : <span className="text-gold-200">시세 갱신 중…</span>}
                 <span className="station-clock" style={{ ["--turn" as string]: String(1 - left / market.tickSeconds) }} aria-hidden="true" />
               </div>
             </div>

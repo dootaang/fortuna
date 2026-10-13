@@ -164,40 +164,137 @@ export async function oracleToken(env: RecorderEnv): Promise<string> {
   return ((await response.json()) as { id_token: string }).id_token;
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const FEED_TO_DISCORD = new Set(["news", "liberation", "houseOpen"]);
 
-/** One cron run: the ticks of the current minute. */
-export async function runMinute(env: RecorderEnv, scheduledMs: number, post: typeof fetch = fetch): Promise<number> {
-  if (!env.ORACLE_REFRESH_TOKEN || !env.MARKET_SECRET) return 0;
-  const fs = new FirestoreRest(env.FIREBASE_PROJECT_ID, await oracleToken(env), env.FIRESTORE_HOST);
-  const start = Math.floor(scheduledMs / 60_000) * 60_000;
-  const recorder = await loadRecorder(fs, env.MARKET_SECRET, Math.max(start, Date.now()));
-  if (!recorder.config.enabled) return 0;
-  const tickMs = recorder.config.tickSeconds * 1000;
-  const observe = recorder.state === null || Math.floor(start / 60_000) % 10 === 0;
-  const [world, news, notifyDoc] = await Promise.all([
-    // Prices keep moving even if the world read or the news read fails this minute.
-    observe ? observeWorld(fs, start).catch((error) => { console.error("observe", error); return undefined; }) : Promise.resolve(undefined),
-    fs.query("marketNews", { status: "pending" }).catch(() => []), fs.get("config/notify").catch(() => null),
-  ]);
-  const notify = normalizeNotify(notifyDoc?.data);
-  let written = 0, first = true;
-  for (let at = start; at < start + 60_000; at += tickMs) {
-    const wait = at - Date.now();
-    if (wait > 0) await sleep(wait);
-    if (Date.now() - at > tickMs) continue;
-    const result = await recordTick(recorder, at, { world: first ? world : undefined, news });
-    first = false;
-    if (result.status !== "written") continue;
-    written += 1;
-    const lines = result.feed.filter((item) => FEED_TO_DISCORD.has(item.kind)).map((item) => `📈 **환전가 소식** ${item.coin ? `[${item.coin}] ` : ""}${item.text}`);
-    if (lines.length && notify.enabled.market && env.DISCORD_WEBHOOK_URL) {
-      await post(env.DISCORD_WEBHOOK_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: "포르투나 환전가", content: lines.join("\n"), allowed_mentions: { parse: [] } }),
-      }).catch(() => undefined);
-    }
+/** When the tick after `nowMs` is due (a little after the boundary, so its time is already past). */
+export function nextTickAt(nowMs: number, tickMs: number): number { return (Math.floor(nowMs / tickMs) + 1) * tickMs + 300; }
+
+/**
+ * One tick per call, at the tick boundary that `nowMs` falls in. Keeps the recorder, the ID token,
+ * pending news and notify settings between calls (the Durable Object holds it while it stays in memory)
+ * and refreshes settings once a minute and the world every ten minutes.
+ */
+export class TickRunner {
+  private recorder: Recorder | null = null;
+  private token: { value: string; until: number } | null = null;
+  private news: Doc[] = [];
+  private notify = normalizeNotify(undefined);
+  private minuteChecked = -1;
+  private worldChecked = -1;
+
+  constructor(private readonly env: RecorderEnv, private readonly post: typeof fetch = fetch) {}
+
+  tickMs(): number { return (this.recorder?.config.tickSeconds ?? 15) * 1000; }
+
+  /** Forget everything; the next call reloads from Firestore. */
+  reset(): void { this.recorder = null; this.minuteChecked = -1; this.worldChecked = -1; }
+
+  /**
+   * What survives the Durable Object being evicted between ticks (it usually is: 15 s of idle).
+   * Without it every tick would log in again and reread settings and the world — about 15 reads a tick.
+   */
+  snapshot(): RunnerSnapshot {
+    const { fs: _fs, secret: _secret, ...recorder } = this.recorder ?? ({} as Recorder);
+    return { token: this.token, recorder: this.recorder ? recorder : null, news: this.news, notify: this.notify, minuteChecked: this.minuteChecked, worldChecked: this.worldChecked };
   }
-  return written;
+
+  restore(snapshot: RunnerSnapshot, nowMs: number): void {
+    this.token = snapshot.token;
+    this.news = snapshot.news;
+    this.notify = snapshot.notify;
+    this.minuteChecked = snapshot.minuteChecked;
+    this.worldChecked = snapshot.worldChecked;
+    this.recorder = snapshot.recorder
+      ? { ...snapshot.recorder, secret: this.env.MARKET_SECRET, fs: new FirestoreRest(this.env.FIREBASE_PROJECT_ID, this.token?.value ?? "", this.env.FIRESTORE_HOST) }
+      : null;
+    // A snapshot from long ago (clock stopped for a while) is not trusted: reload.
+    if (this.recorder?.state && nowMs - this.recorder.state.atMs > 10 * 60_000) this.reset();
+  }
+
+  async run(nowMs: number): Promise<TickResult | null> {
+    if (!this.env.ORACLE_REFRESH_TOKEN || !this.env.MARKET_SECRET) return null;
+    const fs = await this.rest(nowMs);
+    const minute = Math.floor(nowMs / 60_000);
+    if (!this.recorder || minute !== this.minuteChecked) {
+      if (!this.recorder) this.recorder = await loadRecorder(fs, this.env.MARKET_SECRET, nowMs);
+      else this.recorder.config = normalizeMarket((await fs.get("config/market"))?.data);
+      const [news, notify] = await Promise.all([fs.query("marketNews", { status: "pending" }).catch(() => this.news), fs.get("config/notify").catch(() => null)]);
+      this.news = news;
+      this.notify = normalizeNotify(notify?.data);
+      this.minuteChecked = minute;
+    }
+    const recorder = this.recorder;
+    recorder.fs = fs;
+    if (!recorder.config.enabled) return null;
+    const tickMs = recorder.config.tickSeconds * 1000, at = Math.floor(nowMs / tickMs) * tickMs;
+    const tenth = Math.floor(minute / 10);
+    let world: WorldInput | undefined;
+    if (recorder.state === null || tenth !== this.worldChecked) {
+      // Prices keep moving even if the world read fails; it is tried again in ten minutes.
+      world = await observeWorld(fs, at).catch((error) => { console.error("observe", error); return undefined; });
+      this.worldChecked = tenth;
+    }
+    const result = await recordTick(recorder, at, { world, news: this.news });
+    if (result.status === "written") await this.announce(result.feed);
+    return result;
+  }
+
+  private async rest(nowMs: number): Promise<FirestoreRest> {
+    if (!this.token || this.token.until < nowMs) this.token = { value: await oracleToken(this.env), until: nowMs + 50 * 60_000 };
+    return new FirestoreRest(this.env.FIREBASE_PROJECT_ID, this.token.value, this.env.FIRESTORE_HOST);
+  }
+
+  private async announce(feed: FeedItem[]): Promise<void> {
+    const lines = feed.filter((item) => FEED_TO_DISCORD.has(item.kind)).map((item) => `📈 **환전가 소식** ${item.coin ? `[${item.coin}] ` : ""}${item.text}`);
+    if (!lines.length || !this.notify.enabled.market || !this.env.DISCORD_WEBHOOK_URL) return;
+    await this.post(this.env.DISCORD_WEBHOOK_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "포르투나 환전가", content: lines.join("\n"), allowed_mentions: { parse: [] } }),
+    }).catch(() => undefined);
+  }
+}
+
+export interface RunnerSnapshot {
+  token: { value: string; until: number } | null;
+  recorder: Omit<Recorder, "fs" | "secret"> | null;
+  news: Doc[];
+  notify: ReturnType<typeof normalizeNotify>;
+  minuteChecked: number;
+  worldChecked: number;
+}
+
+interface AlarmStorage {
+  getAlarm(): Promise<number | null>;
+  setAlarm(time: number): Promise<void>;
+  get<T>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
+}
+
+/**
+ * 시세 시계. A Durable Object whose alarm fires every tick (15 s), one tick per wake-up.
+ * Cron starts late and unevenly (observed 10–40 s into the minute) and the free plan allows only
+ * ~10 ms CPU per invocation, so the clock lives here; the minute cron only re-arms it.
+ */
+export class MarketClock {
+  private readonly runner: TickRunner;
+  private restored = false;
+  constructor(private readonly state: { storage: AlarmStorage }, env: RecorderEnv) { this.runner = new TickRunner(env); }
+
+  /** Arm the alarm if it is missing or stuck. */
+  async fetch(): Promise<Response> {
+    const alarm = await this.state.storage.getAlarm();
+    if (alarm === null || alarm < Date.now() - 60_000) await this.state.storage.setAlarm(nextTickAt(Date.now(), this.runner.tickMs()));
+    return new Response(alarm === null ? "armed" : "running");
+  }
+
+  async alarm(): Promise<void> {
+    if (!this.restored) {
+      const snapshot = await this.state.storage.get<RunnerSnapshot>("runner");
+      if (snapshot) this.runner.restore(snapshot, Date.now());
+      this.restored = true;
+    }
+    try { await this.runner.run(Date.now()); } catch (error) { console.error("tick", error); this.runner.reset(); }
+    await this.state.storage.put("runner", this.runner.snapshot());
+    await this.state.storage.setAlarm(nextTickAt(Date.now(), this.runner.tickMs()));
+  }
 }
