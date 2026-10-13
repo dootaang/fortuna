@@ -17,3 +17,6 @@ ui-debug.log
 .wrangler/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+
+# GM world documents (contain GM-only secrets)
+자료/

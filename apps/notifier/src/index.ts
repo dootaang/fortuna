@@ -1,7 +1,8 @@
 import { formatNotification, normalizeNotify, type NotifyEvent } from "@fortuna/core";
 import { FirestoreRest } from "./firestore-rest.ts";
+import { runMinute, type RecorderEnv } from "./oracle.ts";
 
-export interface Env {
+export interface Env extends Partial<RecorderEnv> {
   FIREBASE_PROJECT_ID: string;
   ALLOWED_ORIGINS: string;
   DISCORD_WEBHOOK_URL: string;
@@ -11,7 +12,7 @@ export interface Env {
 
 /** Event kinds and the notify toggle that governs each. */
 const TOGGLE: Record<string, NotifyEvent> = {
-  arrival: "arrival", bigGamble: "bigGamble", skill: "skill", shop: "shop", fundFilled: "fundFilled", repaid: "repaid", liberation: "liberation", houseOpen: "houseOpen", pvpOpen: "pvp", pvpWin: "pvp",
+  arrival: "arrival", bigGamble: "bigGamble", skill: "skill", shop: "shop", fundFilled: "fundFilled", repaid: "repaid", liberation: "liberation", houseOpen: "houseOpen", pvpOpen: "pvp", pvpWin: "pvp", marketWin: "market", marketLoss: "market",
 };
 
 function cors(origin: string | null, env: Env): Record<string, string> {
@@ -70,6 +71,11 @@ export async function relay(eventId: string, idToken: string, env: Env, post: ty
 }
 
 export default {
+  /** 시세 기록원: every minute, the ticks of that minute (see oracle.ts). */
+  async scheduled(controller: { scheduledTime: number }, env: Env, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
+    ctx.waitUntil(runMinute(env as RecorderEnv, controller.scheduledTime).catch((error) => console.error("recorder", error)));
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const headers = cors(request.headers.get("Origin"), env);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });

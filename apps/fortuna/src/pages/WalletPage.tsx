@@ -136,6 +136,11 @@ export function describeEntry(entry: LedgerEntry<Timestamp>): string {
     case "fundContribution": return `${detail.title}`;
     case "adminAdjust": return entry.memo;
     case "arrival": return `환영 봉투 ${detail.loan} · 개찰구 ${detail.gateFee}`;
+    case "marketOpen": return `${detail.coin} ${detail.side === "short" ? "숏" : "롱"} ${detail.leverage}배 · 증거금 ${detail.margin} + 수수료 ${detail.fee}`;
+    case "marketClose": {
+      const kind = ({ close: "청산", cap: "자동 익절", liquidated: "강제 청산", refund: "무효 환불" } as Record<string, string>)[detail.kind] ?? "정산";
+      return `${detail.coin} ${detail.side === "short" ? "숏" : "롱"} ${detail.leverage}배 ${kind}${detail.kind === "close" || detail.kind === "cap" ? ` · 손익 ${detail.pnl} · 이자 ${detail.interest} · 수수료 ${detail.fee}` : ""}`;
+    }
     default: return "";
   }
 }

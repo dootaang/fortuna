@@ -14,6 +14,8 @@ service cloud.firestore {
     // ── 공용 함수 ──
     function signedIn() { return request.auth != null; }
     function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+    // 시세 기록원(Cloudflare Worker의 전용 계정). 시세·소식·청산 표시만 쓴다.
+    function isOracle() { return signedIn() && exists(/databases/$(database)/documents/oracles/$(request.auth.uid)); }
     function bindingPath() { return /databases/$(database)/documents/bindings/$(request.auth.uid); }
     function playerPath(pid) { return /databases/$(database)/documents/players/$(pid); }
     function walletPath(pid) { return /databases/$(database)/documents/wallets/$(pid); }
@@ -126,10 +128,11 @@ service cloud.firestore {
 
     // ── 지갑 ──
     match /wallets/{pid} {
-      allow read: if isAdmin() || isPlayer(pid);
+      allow read: if isAdmin() || isPlayer(pid) || isOracle();
       allow create: if isAdmin() && request.resource.data == {
         'playerId': pid, 'balance': 0, 'debt': 0, 'seq': 0, 'arrived': false,
-        'periodIndex': 0, 'workUsed': 0, 'gambleUsed': 0, 'openWager': null, 'room': null
+        'periodIndex': 0, 'workUsed': 0, 'gambleUsed': 0, 'openWager': null, 'room': null,
+        'market': {'period': 0, 'used': 0, 'open': 0}
       };
       // 신원 확인은 장부 규칙이 한다(장부는 본인 또는 관리자만 만들 수 있다).
       allow update: if signedIn() && (ledgerBacked(pid) || (isPlayer(pid) && wagerStep()));
@@ -160,7 +163,7 @@ service cloud.firestore {
 
     // ── 장부 ──
     match /ledger/{entryId} {
-      allow read: if isAdmin() || (signedIn() && resource.data.playerId == myPid() && isPlayer(resource.data.playerId));
+      allow read: if isAdmin() || isOracle() || (signedIn() && resource.data.playerId == myPid() && isPlayer(resource.data.playerId));
       allow create: if validLedger(entryId);
       allow update, delete: if false;
     }
@@ -212,6 +215,8 @@ service cloud.firestore {
         || (e.type == 'itemUse' && itemUseOk(entryId, e, before, after, false))
         || (e.type == 'pvpStake' && pvpStakeOk(entryId, e, before, after))
         || (e.type == 'pvpPayout' && pvpPayoutOk(entryId, e, before, after))
+        || (e.type == 'marketOpen' && marketOpenOk(entryId, e, before, after))
+        || (e.type == 'marketClose' && marketCloseOk(entryId, e, before, after))
       );
     }
 
@@ -701,6 +706,182 @@ service cloud.firestore {
         && e.delta == amount && e.debtDelta == 0
         && e.vaultDelta == (d.kind == 'win' || d.kind == 'lose' ? houseCut : 0)
         && onlyChanged(before, after, ['balance', 'seq', 'room']);
+    }
+
+    // ── 환전가 거래소 ──
+    // 시세는 기록원만 쓴다(market/h{시간}). 진입·정산은 플레이어 장부 + 이 규칙이 계산을 다시 해서 검증한다.
+    // 계산식은 packages/core/src/market/position.ts와 같다.
+    match /oracles/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow list, write: if isAdmin();
+    }
+
+    match /market/{id} {
+      allow read: if signedIn();
+      allow create, update: if isOracle();
+      allow delete: if isAdmin();
+    }
+
+    match /marketFeed/{id} {
+      allow read: if signedIn();
+      allow create: if isOracle() || isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    match /marketNews/{id} {
+      allow read: if isAdmin() || isOracle();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isOracle() && onlyChanged(resource.data, request.resource.data, ['status', 'publishedSeq', 'whispered']));
+    }
+
+    function positionPath(id) { return /databases/$(database)/documents/positions/$(id); }
+    function marketPath(hour) { return /databases/$(database)/documents/market/$('h' + string(hour)); }
+    function marketConfig() { return get(/databases/$(database)/documents/config/market).data; }
+    function marketCounters(w) { return w.get('market', {'period': -1, 'used': 0, 'open': 0}); }
+
+    match /positions/{id} {
+      allow get, list: if isAdmin() || isOracle()
+        || (signedIn() && exists(bindingPath()) && resource.data.playerId == myPid() && isPlayer(myPid()));
+      // 포지션 문서는 여기서, 코인 계산은 함께 만들어지는 장부 규칙에서 검증한다(식 1000개 한도 때문에 나눈다).
+      allow create: if signedIn() && positionCreateOk(id, request.resource.data);
+      allow update: if (isOracle() && oracleEndOk(resource.data, request.resource.data))
+        || (isAdmin() && resource.data.status == 'open' && onlyChanged(resource.data, request.resource.data, ['status']) && request.resource.data.status == 'void')
+        || (signedIn() && settleOk(id, resource.data, request.resource.data));
+      allow delete: if false;
+    }
+
+    // 기록원: 새 시세가 청산가나 수익 상한에 닿은 포지션을 표시만 한다(코인은 움직이지 않는다).
+    function oracleEndOk(p0, p1) {
+      return p0.status == 'open'
+        && onlyChanged(p0, p1, ['status', 'exit', 'exitSeq', 'exitAt'])
+        && ((p1.status == 'liquidated' && p1.exit == p0.liq) || (p1.status == 'capped' && p0.cap > 0 && p1.exit == p0.cap))
+        && p1.exitSeq is int && p1.exitAt is timestamp;
+    }
+
+    // 지금 가장 최신 틱인가: 같은 시간 문서의 last이고, 다음 시간 문서가 아직 없고, 너무 오래되지 않았다.
+    function tickOk(hour, seq, tick, m) {
+      return hour is int && seq is int && tick.seq == seq
+        && !exists(marketPath(hour + 1))
+        && request.time < tick.at + duration.value(m.get('staleSeconds', 90), 's');
+    }
+
+    // floor(a / b) == q (b > 0), 정수만으로.
+    function isFloor(q, a, b) { return q is int && q * b <= a && (q + 1) * b > a; }
+
+    // 수수료 = max(minFee, floor(명목가 × feeBps / 10000))
+    function feeOk(fee, notional, m) {
+      return fee is int && ((fee == m.minFee && notional * m.feeBps < (m.minFee + 1) * 10000)
+        || (fee > m.minFee && isBpsFloor(fee, notional, m.feeBps)));
+    }
+
+    function maxLeverage(m, coin, econ) {
+      let open = econ.gambling.houseOpen == true;
+      let main = coin == 'FTN';
+      return open ? (main ? m.leverage.mainOpen : m.leverage.altOpen) : (main ? m.leverage.mainLocked : m.leverage.altLocked);
+    }
+
+    // 청산가 = 진입가 ∓ floor(진입가 × liquidationBps / (배율 × 10000))
+    function liqOk(liq, entry, side, lev, bps) {
+      return liq is int && isFloor(side == 'long' ? entry - liq : liq - entry, entry * bps, lev * 10000);
+    }
+
+    // 수익 상한가 = 진입가 ± floor(진입가 × capMultiple / 배율). 숏은 0 이하가 되면 상한 없음(0).
+    function capOk(cap, entry, side, lev, cm) {
+      return cap is int && (side == 'long'
+        ? isFloor(cap - entry, entry * cm, lev)
+        : (cm >= lev ? cap == 0 : isFloor(entry - cap, entry * cm, lev)));
+    }
+
+    function marketOpenOk(entryId, e, before, after) {
+      let d = e.detail;
+      let m = marketConfig();
+      let econ = get(configPath()).data;
+      let tick = get(marketPath(d.hour)).data.last;
+      let p = getAfter(positionPath(entryId)).data;
+      let c0 = marketCounters(before);
+      let period = curPeriod(econ.get('limitPeriod', 'day'));
+      let used = (c0.period == period ? c0.used : 0) + 1;
+      let notional = d.margin * d.leverage;
+      return d.keys().hasOnly(['coin', 'side', 'leverage', 'margin', 'fee', 'entry', 'hour', 'seq'])
+        && m.enabled == true && m.coins[d.coin].enabled == true
+        && (d.side == 'long' || d.side == 'short')
+        && d.leverage is int && d.leverage in m.leverage.steps && d.leverage <= maxLeverage(m, d.coin, econ)
+        && d.margin is int && d.margin >= m.minMargin && d.margin <= m.maxMargin
+        && tickOk(d.hour, d.seq, tick, m) && d.entry == tick.p[d.coin]
+        && feeOk(d.fee, notional, m)
+        && e.delta == -(d.margin + d.fee) && e.debtDelta == 0 && e.vaultDelta == d.margin + d.fee
+        && after.market == {'period': period, 'used': used, 'open': c0.open + 1}
+        && used <= m.dailyLimit && c0.open + 1 <= m.maxOpen
+        && onlyChanged(before, after, ['balance', 'seq', 'market'])
+        && p.lastLedger == entryId;
+    }
+
+    function positionCreateOk(id, p) {
+      let e = getAfter(ledgerPath(id)).data;
+      return ledgerCreatedNow(id) && e.type == 'marketOpen' && positionOk(id, p, e.detail, e.playerId, marketConfig());
+    }
+
+    // 정산 장부가 가리키는 대로 닫힌다. 직접 청산이면 종료가·틱·시각이 함께 찍힌다.
+    function settleOk(id, p0, p1) {
+      let e = getAfter(ledgerPath(p1.lastLedger)).data;
+      let d = e.detail;
+      return p1.lastLedger is string && ledgerCreatedNow(p1.lastLedger) && e.type == 'marketClose' && d.positionId == id
+        && onlyChanged(p0, p1, ['status', 'outcome', 'exit', 'exitSeq', 'exitAt', 'payout', 'lastLedger'])
+        && p1.status == 'closed' && p1.outcome == d.kind && p1.payout == d.payout
+        && (d.kind == 'close' ? (p1.exit == d.exit && p1.exitSeq == d.seq && p1.exitAt == request.time)
+                              : (p1.exit == p0.exit && p1.exitSeq == p0.exitSeq && p1.exitAt == p0.exitAt));
+    }
+
+    function positionOk(id, p, d, pid, m) {
+      return p.keys().hasOnly(['playerId', 'coin', 'side', 'leverage', 'margin', 'fee', 'entry', 'entrySeq', 'openedAt', 'liq', 'cap', 'status', 'exit', 'exitSeq', 'exitAt', 'outcome', 'payout', 'lastLedger'])
+        && p.playerId == pid && p.coin == d.coin && p.side == d.side && p.leverage == d.leverage && p.margin == d.margin && p.fee == d.fee
+        && p.entry == d.entry && p.entrySeq == d.seq && p.openedAt == request.time && p.status == 'open'
+        && p.exit == null && p.exitSeq == null && p.exitAt == null && p.outcome == null && p.payout == null && p.lastLedger == id
+        && liqOk(p.liq, d.entry, d.side, d.leverage, m.liquidationBps)
+        && capOk(p.cap, d.entry, d.side, d.leverage, m.capMultiple);
+    }
+
+    // 정산: 직접 청산(close, 최신 틱 가격), 자동 익절(cap), 강제 청산(liquidated), 딜러 무효(refund).
+    function marketCloseOk(entryId, e, before, after) {
+      let d = e.detail;
+      let p0 = get(positionPath(d.positionId)).data;
+      let p1 = getAfter(positionPath(d.positionId)).data;
+      let m = marketConfig();
+      let c0 = marketCounters(before);
+      let manual = d.kind == 'close';
+      return d.keys().hasOnly(['positionId', 'coin', 'side', 'leverage', 'margin', 'kind', 'exit', 'hour', 'seq', 'hours', 'pnl', 'interest', 'fee', 'payout'])
+        && p0.playerId == e.playerId
+        && d.coin == p0.coin && d.side == p0.side && d.leverage == p0.leverage && d.margin == p0.margin
+        && ((manual && p0.status == 'open' && closeExitOk(d, p0, m) && closeMathOk(d, p0, m, request.time))
+            || (d.kind == 'cap' && p0.status == 'capped' && d.exit == p0.exit && d.hour == null && d.seq == null && closeMathOk(d, p0, m, p0.exitAt))
+            || (d.kind == 'liquidated' && p0.status == 'liquidated' && d.exit == p0.exit && d.hour == null && d.seq == null
+                && d.hours == 0 && d.pnl == -d.margin && d.interest == 0 && d.fee == 0 && d.payout == 0)
+            || (d.kind == 'refund' && p0.status == 'void' && d.exit == p0.entry && d.hour == null && d.seq == null
+                && d.hours == 0 && d.pnl == 0 && d.interest == 0 && d.fee == 0 && d.payout == d.margin))
+        && p1.status == 'closed' && p1.lastLedger == entryId
+        && e.delta == d.payout && e.debtDelta == 0 && e.vaultDelta == -d.payout
+        && after.market == {'period': c0.period, 'used': c0.used, 'open': c0.open - 1}
+        && onlyChanged(before, after, ['balance', 'seq', 'market']);
+    }
+
+    function closeExitOk(d, p0, m) {
+      let tick = get(marketPath(d.hour)).data.last;
+      return tickOk(d.hour, d.seq, tick, m) && d.exit == tick.p[p0.coin];
+    }
+
+    // 손익 = floor(명목가 × 가격 변화 / 진입가), 이자 = floor(빌린 돈 × 시간 × interestBps / 10000),
+    // 청산 수수료 = 진입 수수료 (무월 코인은 밤 0~5시에 nightFeeMultiplier배), 지급 = max(0, 증거금 + min(손익, 상한) − 이자 − 수수료)
+    function closeMathOk(d, p0, m, closedAt) {
+      let notional = p0.margin * p0.leverage;
+      let elapsedMs = closedAt.toMillis() - p0.openedAt.toMillis();
+      let night = p0.coin == 'MWL' && (closedAt.toMillis() + 32400000) % 86400000 < 18000000;
+      let gain = d.pnl < p0.margin * m.capMultiple ? d.pnl : p0.margin * m.capMultiple;
+      let raw = p0.margin + gain - d.interest - d.fee;
+      return d.hours is int && d.hours >= 1 && elapsedMs <= d.hours * 3600000 && (d.hours == 1 || elapsedMs > (d.hours - 1) * 3600000)
+        && isFloor(d.pnl, notional * (p0.side == 'long' ? d.exit - p0.entry : p0.entry - d.exit), p0.entry)
+        && isBpsFloor(d.interest, (notional - p0.margin) * d.hours, m.interestBps)
+        && d.fee == p0.fee * (night ? m.nightFeeMultiplier : 1)
+        && d.payout == (raw > 0 ? raw : 0);
     }
 
     // ── 디스코드 알림 ──

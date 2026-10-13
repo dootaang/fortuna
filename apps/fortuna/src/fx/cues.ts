@@ -3,10 +3,11 @@ import { haptic } from "./settings.ts";
 /** Named moments in play. Each maps to a vibration (Android) and, later, a sound. */
 export type Cue =
   | "tap" | "chip" | "card" | "flip" | "dice" | "shake" | "land" | "tick" | "drum"
-  | "win" | "bigWin" | "lose" | "push" | "caught" | "correct" | "wrong" | "perfect" | "combo" | "spin" | "ball";
+  | "win" | "bigWin" | "lose" | "push" | "caught" | "correct" | "wrong" | "perfect" | "combo" | "spin" | "ball"
+  | "flap" | "bell" | "stamp" | "burn";
 
 const VIBRATION: Partial<Record<Cue, number | number[]>> = {
-  tap: 8, chip: 12, land: 18, correct: 10, wrong: [30, 40, 30], perfect: [12, 30, 24], win: [20, 40, 60], bigWin: [30, 50, 30, 50, 90], lose: 60, caught: [80, 60, 120],
+  tap: 8, chip: 12, land: 18, correct: 10, wrong: [30, 40, 30], perfect: [12, 30, 24], win: [20, 40, 60], bigWin: [30, 50, 30, 50, 90], lose: 60, caught: [80, 60, 120], stamp: 30, burn: [40, 30, 80],
 };
 
 let player: ((cue: Cue, intensity: number) => void) | null = null;

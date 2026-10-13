@@ -26,7 +26,7 @@ describe("discord relay worker", () => {
     const hook = discord();
     expect(await relay(`${pid}_1`, await token(player), env, hook.post)).toEqual({ status: "sent" });
     expect(hook.posts[0]).toContain("에이든");
-    expect(hook.posts[0]).toContain("중세판타지");
+    expect(hook.posts[0]).toContain("로엔하임");
     expect(await relay(`${pid}_1`, await token(player), env, hook.post)).toEqual({ status: "already-sent" });
     expect(hook.posts).toHaveLength(1);
     expect((await getDoc(refs.event(player.db, `${pid}_1`))).data()?.sentAt).toBeTruthy();
@@ -60,6 +60,6 @@ describe("discord relay worker", () => {
     const eventId = await setDistrict(admin, "horror", { liberated: true, deductionBps: 5_000 }, "간부 격파");
     const hook = discord();
     expect(await relay(eventId!, await token(admin), env, hook.post)).toEqual({ status: "sent" });
-    expect(hook.posts[0]).toContain("괴담");
+    expect(hook.posts[0]).toContain("무월리");
   });
 });

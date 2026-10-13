@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import { Link } from "react-router";
+import { MarketQuote } from "../market/MarketQuote.tsx";
 import { GAME_CONTENT, TEXT, periodIndexAt, periodStartMs, periodWords, usesLeft } from "@fortuna/core";
 import { usePlayer } from "../session/player.tsx";
 import { Coins, Frame, Ornament, Stat, cx, formatDate } from "../ui/kit.tsx";
@@ -41,6 +43,7 @@ export function Lobby() {
         <VenueCard to="/work" icon="⚒" title={TEXT.lobby.work} meta={district?.liberated ? "구역 해방 · 공제 없음" : `지배인 몫 ${deduction}%`} />
         <VenueCard to="/alley" icon="♣" title={TEXT.lobby.alley} meta={`1판 최대 ${config.gambling.alleyMaxBet.toLocaleString("ko-KR")}`} />
         <VenueCard to="/house" icon="♛" title={TEXT.lobby.house} meta={config.gambling.houseOpen ? `1판 최대 ${config.gambling.houseMaxBet.toLocaleString("ko-KR")}` : "잠김"} locked={!config.gambling.houseOpen} />
+        <VenueCard to="/market" icon="📈" title="환전가 거래소" meta={<MarketQuote />} />
         <VenueCard to="/skills" icon="✦" title={TEXT.skill.title} meta={Object.values(player.skills).map((skill) => `${skill.name} ${skill.level}점`).join(" · ") || "등록된 특기 없음"} />
         {config.shopEnabled && <VenueCard to="/shop" icon="✧" title={TEXT.lobby.shop} meta="소문 · 소모품 · 도전권" />}
       </div>
@@ -62,7 +65,7 @@ export function Lobby() {
   );
 }
 
-function VenueCard({ to, icon, title, meta, locked }: { to: string; icon: string; title: string; meta: string; locked?: boolean }) {
+function VenueCard({ to, icon, title, meta, locked }: { to: string; icon: string; title: string; meta: ReactNode; locked?: boolean }) {
   return (
     <Link to={to} className={cx("group block rise", locked && "opacity-80")}>
       <Frame as="div" className="h-full transition group-hover:border-gold-300">

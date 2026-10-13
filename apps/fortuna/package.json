@@ -15,6 +15,7 @@
     "@fortuna/data": "workspace:*",
     "canvas-confetti": "1.9.4",
     "firebase": "12.19.0",
+    "lightweight-charts": "5.2.1",
     "motion": "13.5.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",

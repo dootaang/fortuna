@@ -19,7 +19,11 @@ export const NOTIFY_TEXT = {
   liberation: "🔓 **{district}** 구역이 해방되었습니다! 이제 이 구역 주민의 임금에서 지배인 몫이 떼이지 않습니다.",
   houseOpen: "♛ 하우스의 금빛 문이 열렸습니다. 지배인이 정중히 손님들을 기다립니다. 행운이 함께하기를.",
   pvpOpen: "🃏 **{name}** 님이 {venue}에 도둑잡기 판을 열었습니다. 판돈 {stake}코인 · 1등이 전부 가져갑니다.",
-  pvpWin: "👑 **{name}** 님이 도둑잡기 판에서 {amount}코인을 쓸어 담았습니다."
+  pvpWin: "👑 **{name}** 님이 도둑잡기 판에서 {amount}코인을 쓸어 담았습니다.",
+  marketCap: "📈 **{name}** 님의 {coin} {side} {leverage}배가 수익 상한에 닿아 자동 익절되었습니다. {net}코인을 챙겼군요.",
+  marketWin: "📈 **{name}** 님이 환전가 거래소에서 {coin} {side} {leverage}배로 {net}코인을 벌었습니다.",
+  marketLoss: "📉 **{name}** 님이 환전가 거래소에서 {coin} {side} {leverage}배로 {net}코인을 잃었습니다.",
+  marketLiquidated: "📉 **{name}** 님의 {coin} {side} {leverage}배가 강제 청산되었습니다. 증거금 {margin}코인은 지배인이 잘 보관하겠답니다."
 } as const;
 
 export interface NotifyInput {
@@ -60,6 +64,15 @@ export function formatNotification(input: NotifyInput, bigGamble: number): strin
     case "houseOpen": return NOTIFY_TEXT.houseOpen;
     case "pvpOpen": return fill(NOTIFY_TEXT.pvpOpen, { name, venue: s(detail.venue) === "house" ? "하우스" : "뒷골목", stake: n(detail.stake) });
     case "pvpWin": return fill(NOTIFY_TEXT.pvpWin, { name, amount: n(input.delta) });
+    case "marketWin":
+    case "marketLoss": {
+      const kind = s(detail.kind), net = n(detail.payout) - n(detail.margin);
+      const values = { name, coin: s(detail.coin), side: s(detail.side) === "short" ? "숏" : "롱", leverage: n(detail.leverage), margin: n(detail.margin), net: Math.abs(net) };
+      if (kind === "cap") return fill(NOTIFY_TEXT.marketCap, values);
+      if (Math.abs(net) < bigGamble && !(kind === "liquidated" && n(detail.margin) >= bigGamble / 2)) return null;
+      if (kind === "liquidated") return fill(NOTIFY_TEXT.marketLiquidated, values);
+      return fill(net > 0 ? NOTIFY_TEXT.marketWin : NOTIFY_TEXT.marketLoss, values);
+    }
     default: return null;
   }
 }

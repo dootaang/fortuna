@@ -99,6 +99,11 @@ function play(cue: Cue, intensity: number): void {
       break;
     case "lose": tone(ctx, { freq: 392, to: 294, dur: 0.35, gain: 0.14, type: "triangle" }); tone(ctx, { freq: 294, to: 220, at: 0.18, dur: 0.45, gain: 0.12, type: "triangle" }); break;
     case "push": tone(ctx, { freq: 660, dur: 0.08, gain: 0.1 }); tone(ctx, { freq: 660, at: 0.12, dur: 0.08, gain: 0.1 }); break;
+    // 역 출발 안내판의 넘김판, 역의 종, 약정서 도장, 타들어 가는 증거금.
+    case "flap": for (let hit = 0; hit < 4; hit += 1) click(ctx, hit * 0.028 + Math.random() * 0.01, 0.1, 900 + Math.random() * 700); break;
+    case "bell": tone(ctx, { freq: 1_046.5, dur: 1.4, gain: 0.12 }); tone(ctx, { freq: 1_568, at: 0.01, dur: 1.1, gain: 0.06 }); tone(ctx, { freq: 2_093, at: 0.02, dur: 0.6, gain: 0.03 }); break;
+    case "stamp": tone(ctx, { freq: 110, to: 55, dur: 0.18, gain: 0.4 }); hiss(ctx, { dur: 0.06, gain: 0.2, filter: "lowpass", freq: 800 }); break;
+    case "burn": hiss(ctx, { dur: 1.2, gain: 0.12, filter: "bandpass", freq: 600, to: 2_400, q: 0.5 }); for (let pop = 0; pop < 6; pop += 1) click(ctx, 0.1 + Math.random() * 0.9, 0.12, 1_200 + Math.random() * 2_000); break;
     case "caught":
       for (const at of [0, 0.32]) {
         const start = ctx.currentTime + at, osc = ctx.createOscillator(), lfo = ctx.createOscillator(), depth = ctx.createGain(), env = ctx.createGain();

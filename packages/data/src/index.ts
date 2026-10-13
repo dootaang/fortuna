@@ -3,3 +3,4 @@ export * from "./ledger-write.ts";
 export * from "./player-ops.ts";
 export * from "./admin-ops.ts";
 export * from "./pvp-ops.ts";
+export * from "./market-ops.ts";

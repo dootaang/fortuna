@@ -43,7 +43,7 @@ test("dealer: sign in, get allow-listed, register a player, audit and liberate",
 
   // Liberate the wuxia district.
   await page.getByRole("button", { name: "구역", exact: true }).click();
-  const wuxia = page.locator(".deco-frame", { hasText: "무협 구역 간부" });
+  const wuxia = page.locator(".deco-frame", { hasText: "천마 (무협)" });
   await wuxia.getByText("해방됨").click();
   await wuxia.getByRole("button", { name: "저장" }).click();
   await expect(wuxia.getByText("해방", { exact: true })).toBeVisible();

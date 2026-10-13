@@ -9,6 +9,7 @@ import { Frame, Splash, cx } from "../ui/kit.tsx";
 import { Counter } from "../fx/Counter.tsx";
 import { FxSettingsButton } from "../fx/FxSettings.tsx";
 import { useAutoClaim } from "../pvp/PvpLobby.tsx";
+import { useAutoSettle } from "../market/useMarket.ts";
 import { Gate, type GateState } from "./Gate.tsx";
 import { Arrival } from "./Arrival.tsx";
 
@@ -49,7 +50,7 @@ function DealerSignedIn({ email }: { email: string }) {
 const NAV = [
   { to: "/", label: "로비", icon: "◆", end: true },
   { to: "/work", label: "일터", icon: "⚒" },
-  { to: "/alley", label: "도박장", icon: "♠", also: "/house" },
+  { to: "/alley", label: "도박장", icon: "♠", also: ["/house", "/market", "/table", "/pvp"] },
   { to: "/skills", label: "특기", icon: "✦" },
   { to: "/wallet", label: "지갑", icon: "◈" },
 ];
@@ -57,6 +58,7 @@ const NAV = [
 function PlayerShell() {
   const { wallet, player } = usePlayer();
   useAutoClaim();
+  useAutoSettle();
   return (
     <div className="with-nav min-h-dvh">
       <header className="sticky top-0 z-30 border-b border-gold-400/25 bg-felt-950/85 backdrop-blur">
@@ -83,7 +85,7 @@ function PlayerShell() {
             <li key={item.to}>
               <NavLink
                 to={item.to} end={item.end ?? false}
-                className={({ isActive }) => cx("flex min-h-[3.75rem] flex-col items-center justify-center gap-0.5 text-[0.72rem]", isActive || (item.also && window.location.pathname.startsWith(item.also)) ? "text-gold-200" : "text-mist")}
+                className={({ isActive }) => cx("flex min-h-[3.75rem] flex-col items-center justify-center gap-0.5 text-[0.72rem]", isActive || (item.also?.some((path) => window.location.pathname.startsWith(path))) ? "text-gold-200" : "text-mist")}
               >
                 <span aria-hidden="true" className="text-lg leading-none">{item.icon}</span>
                 {item.label}

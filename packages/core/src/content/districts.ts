@@ -21,8 +21,8 @@ export interface DistrictContent {
 
 export const DISTRICTS: readonly DistrictContent[] = [
   {
-    id: "modern", name: "현대판타지", hasOfficer: true, officerTitle: "현대판타지 구역 간부", emblem: "🏙️", accent: "#7fb7d9",
-    blurb: "네온 간판 아래 헌터 길드와 편의점이 나란히 불을 켜는 구역.",
+    id: "modern", name: "한빛특구", hasOfficer: true, officerTitle: "탑 (현대판타지)", emblem: "🏙️", accent: "#7fb7d9",
+    blurb: "유리 빌딩과 24시간 편의점 불빛 사이로 검은 탑이 솟은 구역. 전광판에 공략 순위와 코인 시세가 흐른다.",
     work: {
       sort: {
         title: "길드 의뢰서 분류", intro: "밤새 쌓인 의뢰서를 창구별로 나눠 꽂으세요.", icon: "📜",
@@ -45,8 +45,8 @@ export const DISTRICTS: readonly DistrictContent[] = [
     },
   },
   {
-    id: "medieval", name: "중세판타지", hasOfficer: true, officerTitle: "중세판타지 구역 간부", emblem: "🏰", accent: "#c9a46b",
-    blurb: "성벽과 대장간 연기, 약초 냄새가 섞인 돌길의 구역.",
+    id: "medieval", name: "로엔하임", hasOfficer: true, officerTitle: "마왕 (중세판타지)", emblem: "🏰", accent: "#c9a46b",
+    blurb: "성벽과 첨탑, 망치 소리와 약초 냄새. 언덕 위 검은 성의 마왕이 세금을 걷는 구역.",
     work: {
       sort: {
         title: "약초 감별", intro: "약초상에 들어온 풀을 약초와 독초로 가르세요.", icon: "🌿",
@@ -68,8 +68,8 @@ export const DISTRICTS: readonly DistrictContent[] = [
     },
   },
   {
-    id: "wuxia", name: "무협", hasOfficer: true, officerTitle: "무협 구역 간부", emblem: "🏯", accent: "#d97a5b",
-    blurb: "객잔의 등불과 표국 깃발이 휘날리는, 강호의 규칙이 남은 구역.",
+    id: "wuxia", name: "중원", hasOfficer: true, officerTitle: "천마 (무협)", emblem: "🏯", accent: "#d97a5b",
+    blurb: "붉은 등롱과 처마가 맞닿은 거리. 표국 수레가 오가고, 언덕 위 흑전각에서 천마가 내려다본다.",
     work: {
       sort: {
         title: "표국 화물 분류", intro: "오늘 실을 화물을 종류별 수레에 나눠 실으세요. 귀중품은 표사가 따로 지킵니다.", icon: "📦",
@@ -92,8 +92,8 @@ export const DISTRICTS: readonly DistrictContent[] = [
     },
   },
   {
-    id: "cyberpunk", name: "사이버펑크", hasOfficer: true, officerTitle: "사이버펑크 구역 간부", emblem: "🌃", accent: "#d35fd1",
-    blurb: "비에 젖은 홀로그램과 불법 개조 의원이 공존하는 구역.",
+    id: "cyberpunk", name: "섹터9", hasOfficer: true, officerTitle: "회장 (사이버펑크)", emblem: "🌃", accent: "#d35fd1",
+    blurb: "산성비와 네온, 의체 구독료. 구역 전체가 회장의 회사 소유다.",
     work: {
       sort: {
         title: "칩 검수", intro: "컨베이어 위 칩을 정품·불량·위조로 가르세요.", icon: "💾",
@@ -116,8 +116,8 @@ export const DISTRICTS: readonly DistrictContent[] = [
     },
   },
   {
-    id: "scifi", name: "SF", hasOfficer: true, officerTitle: "SF 구역 간부", emblem: "🚀", accent: "#8fd0c4",
-    blurb: "정거장 엔진 소리가 끊이지 않는 우주항과 연구 구역.",
+    id: "scifi", name: "궤도 정거장", hasOfficer: true, officerTitle: "마더 (SF)", emblem: "🚀", accent: "#8fd0c4",
+    blurb: "하늘 대신 격벽이 덮인 함선의 뱃속. 마더가 공기와 조명과 요금을 돌본다.",
     work: {
       sort: {
         title: "화물 검역", intro: "입항 화물을 일반·위험·생물로 분류하세요.", icon: "🛰️",
@@ -140,8 +140,8 @@ export const DISTRICTS: readonly DistrictContent[] = [
     },
   },
   {
-    id: "romance", name: "로맨스판타지", hasOfficer: true, officerTitle: "로맨스판타지 구역 간부", emblem: "🌹", accent: "#e8a0b4",
-    blurb: "무도회장 샹들리에와 귀족 저택이 늘어선 사교계 구역.",
+    id: "romance", name: "벨루체", hasOfficer: true, officerTitle: "북부대공 (로맨스판타지)", emblem: "🌹", accent: "#e8a0b4",
+    blurb: "샹들리에와 장미 정원의 사교계. 북부대공이 고개를 끄덕여야 음악이 시작된다.",
     work: {
       sort: {
         title: "초대장 분류", intro: "봉랍 문장을 보고 초대장을 가문별로 나누세요.", icon: "💌",
@@ -164,8 +164,8 @@ export const DISTRICTS: readonly DistrictContent[] = [
     },
   },
   {
-    id: "horror", name: "괴담", hasOfficer: true, officerTitle: "괴담 구역 간부", emblem: "🕯️", accent: "#9aa36b",
-    blurb: "꺼지지 않는 등불과 지켜야 할 규칙이 많은, 다크판타지와 호러의 구역.",
+    id: "horror", name: "무월리", hasOfficer: true, officerTitle: "호텔 (괴담)", emblem: "🕯️", accent: "#9aa36b",
+    blurb: "안개와 꺼진 등롱, 달이 뜨지 않는 마을. 한가운데의 호텔은 수칙을 어긴 손님을 잊지 않는다.",
     work: {
       sort: {
         title: "부적 분류", intro: "들어온 부적을 진품·가품·저주로 가르세요. 저주품은 만지지 말 것.", icon: "🧿",
@@ -188,8 +188,8 @@ export const DISTRICTS: readonly DistrictContent[] = [
     },
   },
   {
-    id: "downtown", name: "도심", hasOfficer: false, officerTitle: "", emblem: "🚉", accent: "#d4af37",
-    blurb: "종착역과 환전소, 지배인의 하우스가 있는 포르투나의 중심. 어느 장르에도 속하지 않는다.",
+    id: "downtown", name: "휠 광장", hasOfficer: false, officerTitle: "", emblem: "🚉", accent: "#d4af37",
+    blurb: "종착역과 환전가, 지배인의 하우스가 있는 포르투나의 중심. 어느 장르에도 속하지 않는다.",
     work: {
       sort: {
         title: "역 수하물 정리", intro: "도착 열차의 짐을 보관·분실물·파손으로 나누세요.", icon: "🧳",

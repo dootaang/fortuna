@@ -1,0 +1,169 @@
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { getAuth } from "firebase/auth";
+import { deleteField, doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
+import { DEFAULT_MARKET, normalizeEconomy, quoteClose, quoteOpen, type CoinId } from "@fortuna/core";
+import {
+  arrive, closePosition, openPosition, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
+  type PlayerSession, type Session,
+} from "@fortuna/data";
+import { FirestoreRest } from "../../../apps/notifier/src/firestore-rest.ts";
+import { loadRecorder, recordTick, type Recorder } from "../../../apps/notifier/src/oracle.ts";
+import { anonymousSession, asRoot, cityWithPlayer, closeAll, resetData, rootData } from "./harness.ts";
+
+const denied = async (promise: Promise<unknown>) => { await expect(promise).rejects.toMatchObject({ code: "permission-denied" }); };
+const host = `http://${process.env.FIRESTORE_EMULATOR_HOST ?? "127.0.0.1:8080"}`;
+
+let admin: Session, player: PlayerSession, oracle: Session, recorder: Recorder, clockMs: number;
+
+async function oracleRest(session: Session) { return new FirestoreRest("demo-fortuna", await getAuth(session.db.app).currentUser!.getIdToken(), host); }
+
+/** Record the next tick (15 s later than the previous one). */
+async function tick(options: Parameters<typeof recordTick>[2] = {}) {
+  clockMs += 15_000;
+  return recordTick(recorder, clockMs, options);
+}
+
+beforeEach(async () => {
+  await resetData();
+  ({ admin, player } = await cityWithPlayer());
+  await arrive(player);
+  oracle = await anonymousSession();
+  await registerOracle(admin, oracle.uid);
+  clockMs = Math.floor(Date.now() / 15_000) * 15_000 - 15_000;
+  recorder = await loadRecorder(await oracleRest(oracle), "secret", clockMs);
+  await tick();
+});
+afterAll(closeAll);
+
+/** Open a position the way openPosition does, with fields overridden to probe the rules. */
+async function rawOpen(session: PlayerSession, coin: CoinId, leverage: number, margin: number, patch: { detail?: Record<string, unknown>; position?: Record<string, unknown> } = {}) {
+  await runTransaction(session.db, async (tx) => {
+    const wallet = await readWallet(tx, session), { hour, tick: last } = await readLatestTick(tx, session.db, Date.now());
+    const quote = quoteOpen(DEFAULT_MARKET, coin, "long", leverage, margin, last.p[coin]);
+    const before = wallet.market ?? { period: -1, used: 0, open: 0 }, period = session.clock.period("day");
+    const id = writeEntry(tx, session, session.pid, wallet, {
+      type: "marketOpen", actor: "player", delta: -quote.cost, vaultDelta: quote.cost,
+      detail: { coin, side: "long", leverage, margin, fee: quote.fee, entry: quote.entry, hour, seq: last.seq, ...patch.detail },
+      wallet: { market: { period, used: (before.period === period ? before.used : 0) + 1, open: before.open + 1 } },
+    });
+    tx.set(refs.position(session.db, id), {
+      playerId: session.pid, coin, side: "long", leverage, margin, fee: quote.fee, entry: quote.entry, entrySeq: last.seq, openedAt: serverTimestamp() as unknown as Timestamp,
+      liq: quote.liq, cap: quote.cap, status: "open", exit: null, exitSeq: null, exitAt: null, outcome: null, payout: null, lastLedger: id, ...patch.position,
+    });
+  });
+}
+
+describe("price recorder", () => {
+  it("writes ticks and candles; nobody else can", async () => {
+    const hour = Math.floor(clockMs / 3_600_000);
+    const doc1 = await rootData(`market/h${hour}`);
+    expect(doc1?.last.seq).toBe(Math.floor(clockMs / 15_000));
+    expect(Object.keys(doc1?.c ?? {})).toHaveLength(1);
+    expect((await tick()).status).toBe("written");
+    await denied(setDoc(doc(player.db, "market", `h${hour + 5}`), { last: { seq: 1 } }));
+    const stranger = await anonymousSession();
+    await denied(setDoc(doc(stranger.db, "market", `h${hour + 5}`), { last: { seq: 1 } }));
+    await denied(updateDoc(refs.wallet(oracle.db, player.pid), { balance: 1_000_000 }));
+  });
+
+  it("publishes dealer news and its whisper, which players cannot read early", async () => {
+    const id = await scheduleNews(admin, { coin: "LNH", dir: 1, size: "m", minutes: 30, headline: "마왕성 창문의 불이 꺼졌다.", whisper: "성문 광장 줄이 짧아졌다는 말이 돈다.", whisperMinutes: 1, delayMinutes: 0.5 });
+    await denied(getDoc(refs.news(player.db, id)));
+    const rest = await oracleRest(oracle);
+    const pending = await rest.query("marketNews", { status: "pending" });
+    const first = await tick({ news: pending });
+    expect(first.feed.map((item) => item.kind)).toContain("whisper");
+    clockMs += 30_000;
+    const second = await tick({ news: pending });
+    expect(second.feed.find((item) => item.kind === "news")?.text).toBe("마왕성 창문의 불이 꺼졌다.");
+    expect((await rootData(`marketNews/${id}`))?.status).toBe("published");
+    expect((await getDoc(doc(player.db, "marketFeed", `${second.seq}_0`))).exists()).toBe(true);
+  });
+});
+
+describe("positions", () => {
+  it("opens at the newest price and settles exactly", async () => {
+    const vault0 = (await rootData("vault/main"))?.amount;
+    const { positionId, quote } = await openPosition(player, { coin: "FTN", side: "long", leverage: 5, margin: 200 });
+    const wallet1 = (await rootData(`wallets/${player.pid}`))!;
+    expect(wallet1.balance).toBe(900 - quote.cost);
+    expect(wallet1.market).toMatchObject({ used: 1, open: 1 });
+    expect((await rootData("vault/main"))?.amount).toBe(vault0 + quote.cost);
+    await tick();
+    const result = await closePosition(player, positionId);
+    const price = (await rootData(`market/h${Math.floor(clockMs / 3_600_000)}`))!.last.p.FTN;
+    const expected = quoteClose(DEFAULT_MARKET, { coin: "FTN", side: "long", leverage: 5, margin: 200, fee: quote.fee, entry: quote.entry, openedAtMs: Date.now() }, "close", price, Date.now());
+    expect(result.quote.payout).toBe(expected.payout);
+    const wallet2 = (await rootData(`wallets/${player.pid}`))!;
+    expect(wallet2.balance).toBe(900 - quote.cost + expected.payout);
+    expect(wallet2.market.open).toBe(0);
+    expect((await rootData(`positions/${positionId}`))).toMatchObject({ status: "closed", outcome: "close", payout: expected.payout });
+    await expect(closePosition(player, positionId)).rejects.toMatchObject({ code: "settled" });
+  });
+
+  it("rejects a wrong price, a stale tick, too much leverage and too many positions", async () => {
+    await denied(rawOpen(player, "FTN", 5, 100, { detail: { entry: 1 }, position: { entry: 1 } }));
+    await denied(rawOpen(player, "FTN", 20, 100));
+    await denied(rawOpen(player, "HBT", 5, 100));
+    await denied(rawOpen(player, "FTN", 5, 100, { position: { liq: 1 } }));
+    await denied(rawOpen(player, "FTN", 5, 5));
+    const economy = normalizeEconomy((await getDoc(refs.config(admin.db))).data());
+    await saveEconomy(admin, { ...economy, gambling: { ...economy.gambling, houseOpen: true } }, economy);
+    await rawOpen(player, "FTN", 20, 100);
+    await saveMarket(admin, { ...DEFAULT_MARKET, maxOpen: 1 });
+    await denied(rawOpen(player, "FTN", 5, 100));
+    await saveMarket(admin, { ...DEFAULT_MARKET, coins: { ...DEFAULT_MARKET.coins, ORB: { enabled: false, volMult: 1 } } });
+    await denied(rawOpen(player, "ORB", 3, 100));
+    const hour = Math.floor(clockMs / 3_600_000);
+    await asRoot((root) => root.doc(`market/h${hour}`).update({ "last.at": new Date(Date.now() - 120_000) }));
+    await denied(rawOpen(player, "WHL", 3, 100));
+  });
+
+  it("counts a wallet made before the exchange as fresh", async () => {
+    await asRoot((root) => root.doc(`wallets/${player.pid}`).update({ market: deleteField() }));
+    await openPosition(player, { coin: "WHL", side: "short", leverage: 3, margin: 100 });
+    expect((await rootData(`wallets/${player.pid}`))?.market).toMatchObject({ used: 1, open: 1 });
+  });
+
+  it("is liquidated by the recorder and can then only be booked at zero", async () => {
+    const { positionId } = await openPosition(player, { coin: "FTN", side: "long", leverage: 5, margin: 300 });
+    // Pretend the price fell through the liquidation line on the next tick.
+    await asRoot((root) => root.doc(`positions/${positionId}`).update({ liq: 10_000_000 }));
+    const result = await tick();
+    expect(result.closed).toEqual([positionId]);
+    expect(await rootData(`positions/${positionId}`)).toMatchObject({ status: "liquidated", exit: 10_000_000 });
+    await denied(updateDoc(refs.position(player.db, positionId), { status: "open" }));
+    const [settled] = await settleEndedPositions(player);
+    expect(settled?.quote).toMatchObject({ kind: "liquidated", payout: 0 });
+    expect((await rootData(`wallets/${player.pid}`))?.market.open).toBe(0);
+  });
+
+  it("is capped by the recorder and pays the capped profit", async () => {
+    const { positionId, quote } = await openPosition(player, { coin: "FTN", side: "long", leverage: 5, margin: 100 });
+    await asRoot((root) => root.doc(`positions/${positionId}`).update({ cap: 1 }));
+    await tick();
+    const position = (await rootData(`positions/${positionId}`))!;
+    expect(position.status).toBe("capped");
+    const result = await closePosition(player, positionId);
+    expect(result.quote.kind).toBe("cap");
+    expect(result.quote.payout).toBe(quoteClose(DEFAULT_MARKET, { coin: "FTN", side: "long", leverage: 5, margin: 100, fee: quote.fee, entry: quote.entry, openedAtMs: 0 }, "cap", 1, 1).payout);
+  });
+
+  it("refunds the margin when the dealer voids a position", async () => {
+    const { positionId } = await openPosition(player, { coin: "JWN", side: "long", leverage: 2, margin: 150 });
+    await denied(updateDoc(refs.position(player.db, positionId), { status: "void" }));
+    await voidPosition(admin, positionId, "기록원 정지");
+    const before = (await rootData(`wallets/${player.pid}`))!.balance;
+    const result = await closePosition(player, positionId);
+    expect(result.quote).toMatchObject({ kind: "refund", payout: 150 });
+    expect((await rootData(`wallets/${player.pid}`))!.balance).toBe(before + 150);
+  });
+
+  it("keeps other players and the oracle away from a position", async () => {
+    const { positionId } = await openPosition(player, { coin: "FTN", side: "short", leverage: 2, margin: 100 });
+    const stranger = await anonymousSession();
+    await denied(getDoc(refs.position(stranger.db, positionId)));
+    await denied(updateDoc(refs.position(oracle.db, positionId), { status: "liquidated", exit: 1, exitSeq: 1, exitAt: serverTimestamp() }));
+    await denied(updateDoc(refs.position(oracle.db, positionId), { margin: 1 }));
+  });
+});

@@ -41,6 +41,8 @@ export async function bootstrapCity(session: Session, options: { pvpDeals?: bool
   if (!(await getDoc(refs.vault(db))).exists()) { batch.set(refs.vault(db), { amount: economy?.vaultInitial ?? DEFAULT_ECONOMY.vaultInitial, lastLedger: "" }); created.push("지배인 금고"); }
   if (!(await getDoc(refs.treasury(db))).exists()) { batch.set(refs.treasury(db), { amount: 0, lastLedger: "" }); created.push("공동 지갑"); }
   if (created.length) await batch.commit();
+  const { ensureMarket } = await import("./market-ops.ts");
+  if (await ensureMarket(session)) created.push("거래소 설정");
   if (options.pvpDeals !== false) {
     const { ensurePvpDeals } = await import("./pvp-ops.ts");
     if (await ensurePvpDeals(session)) created.push("대결 배분표");

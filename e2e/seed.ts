@@ -96,3 +96,32 @@ export async function seedPlayers(names: string[]): Promise<string[]> {
     return codes;
   });
 }
+
+/**
+ * A stand-in for the Cloudflare price recorder: an oracle account that records a tick every
+ * `everyMs` of real time, each 15 s of market time later than the last (so tests need not wait).
+ */
+export async function startRecorder(everyMs = 1_000): Promise<{ stop: () => Promise<void>; recorder: import("../apps/notifier/src/oracle.ts").Recorder; tick: () => Promise<unknown> }> {
+  const { signInAnonymously } = await import("firebase/auth");
+  const { FirestoreRest } = await import("../apps/notifier/src/firestore-rest.ts");
+  const { loadRecorder, recordTick } = await import("../apps/notifier/src/oracle.ts");
+  const app = initializeApp({ projectId: PROJECT, apiKey: "demo-key", authDomain: `${PROJECT}.firebaseapp.com` }, `oracle-${Date.now()}`);
+  const auth = getAuth(app);
+  connectAuthEmulator(auth, `http://${AUTH}`, { disableWarnings: true });
+  const { user } = await signInAnonymously(auth);
+  const response = await fetch(`http://${FIRESTORE}/v1/projects/${PROJECT}/databases/(default)/documents/oracles?documentId=${user.uid}`, {
+    method: "POST", headers: { Authorization: "Bearer owner", "Content-Type": "application/json" }, body: JSON.stringify({ fields: {} }),
+  });
+  if (!response.ok) throw new Error(`oracle registration failed: ${response.status}`);
+  const rest = new FirestoreRest(PROJECT, await user.getIdToken(), `http://${FIRESTORE}`);
+  let at = Math.floor(Date.now() / 15_000) * 15_000 - 30_000;
+  const recorder = await loadRecorder(rest, "e2e-secret", at);
+  const tick = async () => { at += 15_000; return recordTick(recorder, at); };
+  await tick();
+  let running = true;
+  const loop = (async () => { while (running) { await new Promise((resolve) => setTimeout(resolve, everyMs)); if (running) await tick().catch(() => undefined); } })();
+  return {
+    recorder, tick,
+    stop: async () => { running = false; await loop; await deleteApp(app).catch(() => undefined); },
+  };
+}

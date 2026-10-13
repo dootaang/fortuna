@@ -13,7 +13,7 @@
 | `packages/core` | 순수 로직: 경제 공식, 주차 계산, 도박 8종, 일 게임 4종, 구역·문구 콘텐츠 |
 | `packages/data` | Firestore 읽기·쓰기. 모든 코인 변동은 여기의 트랜잭션을 거친다 |
 | `packages/rules-tests` | 에뮬레이터에서 `firestore.rules`를 실제 앱 코드로 검증 |
-| `apps/notifier` | 디스코드 웹훅 중계 (Cloudflare Worker) |
+| `apps/notifier` | 디스코드 웹훅 중계 + 환전가 시세 기록원 (Cloudflare Worker, 크론) |
 | `firestore.rules` | 보안 규칙. 장부 없는 코인 변동은 불가능 |
 
 Firebase Spark(무료) 요금제 안에서 Authentication(익명 + 관리자 Google), Firestore, Hosting만 쓴다. Cloud Functions는 쓰지 않는다.
@@ -37,6 +37,8 @@ corepack pnpm release      # 빌드 후 Hosting + Firestore 규칙/인덱스 배
   결과를 미리 알 수 없고, 관리자는 기록을 재생해 지급액을 검증할 수 있다.
 - **접속 코드**: 익명 로그인 기기를 접속 코드로 캐릭터에 연결한다. 코드 원문은 저장하지 않고 해시만 저장한다.
   재발급하면 예전 기기는 모두 끊긴다.
+- **환전가 거래소**: 시세는 Worker가 15초마다 찍고(미래 가격은 어디에도 없다), 진입·청산은 장부 + 규칙이 최신 틱 가격으로 다시 계산한다.
+  강제 청산은 새 시세와 같은 커밋으로 표시돼 지난 가격으로 빠져나갈 수 없다. [docs/SPEC-COIN-MARKET.md](./docs/SPEC-COIN-MARKET.md)
 - **설정**: 수치는 Firestore `config/economy`(관리자 화면에서 수정), 구역 이름·일 게임 겉모습·문구는 `packages/core/src/content`.
 
 자세한 내용은 [docs/SPEC.md](./docs/SPEC.md), 운영 방법은 [docs/DEALER-GUIDE.md](./docs/DEALER-GUIDE.md).

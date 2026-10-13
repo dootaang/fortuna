@@ -1,5 +1,5 @@
 import { collection, doc, type CollectionReference, type DocumentReference, type Firestore, type Timestamp } from "firebase/firestore";
-import type { LedgerEntry, Wallet } from "@fortuna/core";
+import type { CoinId, FeedTone, HourDoc, LedgerEntry, NewsSize, Side, Wallet } from "@fortuna/core";
 
 export interface SkillDoc { name: string; level: number; }
 
@@ -68,7 +68,7 @@ export interface InventoryDoc {
   lastLedger: string;
 }
 
-export const EVENT_KINDS = ["arrival", "bigGamble", "skill", "shop", "fundFilled", "liberation", "repaid", "houseOpen", "pvpOpen", "pvpWin"] as const;
+export const EVENT_KINDS = ["arrival", "bigGamble", "skill", "shop", "fundFilled", "liberation", "repaid", "houseOpen", "pvpOpen", "pvpWin", "marketWin", "marketLoss"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 export interface EventDoc {
   kind: EventKind;
@@ -79,6 +79,49 @@ export interface EventDoc {
   sentAt: Timestamp | null;
   /** Admin-authored events carry their text here; player events are rendered from the ledger entry. */
   payload: Record<string, string | number | boolean>;
+}
+
+/** positions/{ledgerId of marketOpen}. */
+export interface PositionDoc {
+  playerId: string;
+  coin: CoinId;
+  side: Side;
+  leverage: number;
+  margin: number;
+  fee: number;
+  entry: number;
+  entrySeq: number;
+  openedAt: Timestamp;
+  liq: number;
+  /** 0 = no take-profit cap (a short that could never reach it). */
+  cap: number;
+  /** open → (liquidated | capped by the price recorder, void by the dealer) → closed by the player's settlement. */
+  status: "open" | "liquidated" | "capped" | "void" | "closed";
+  exit: number | null;
+  exitSeq: number | null;
+  exitAt: Timestamp | null;
+  outcome: "close" | "cap" | "liquidated" | "refund" | null;
+  payout: number | null;
+  lastLedger: string;
+}
+
+/** marketFeed/{seq_i}: lines under the board, written by the price recorder. */
+export interface FeedDoc { kind: string; coin: CoinId | null; tone: FeedTone; text: string; seq: number; at: Timestamp; }
+
+/** marketNews/{id}: dealer drafts the recorder publishes at publishAt (whisper first, if any). */
+export interface NewsDoc {
+  coin: CoinId;
+  dir: 1 | -1 | 0;
+  size: NewsSize;
+  minutes: number;
+  headline: string;
+  whisper: string;
+  whisperAt: Timestamp | null;
+  publishAt: Timestamp;
+  status: "pending" | "published" | "cancelled";
+  whispered: boolean;
+  publishedSeq: number | null;
+  createdAt: Timestamp;
 }
 
 export interface AdminLogDoc { kind: string; target: string; amount: number; memo: string; actorUid: string; at: Timestamp; }
@@ -115,4 +158,13 @@ export const refs = {
   events: (db: Firestore) => typedCollection<EventDoc>(collection(db, "events")),
   adminLog: (db: Firestore) => typedCollection<AdminLogDoc>(collection(db, "adminLog")),
   clock: (db: Firestore, uid: string) => doc(db, "clocks", uid),
+  marketConfig: (db: Firestore) => doc(db, "config", "market"),
+  marketHour: (db: Firestore, hour: number) => typed<HourDoc<Timestamp>>(doc(db, "market", `h${hour}`)),
+  marketFeed: (db: Firestore) => typedCollection<FeedDoc>(collection(db, "marketFeed")),
+  news: (db: Firestore, id: string) => typed<NewsDoc>(doc(db, "marketNews", id)),
+  newsList: (db: Firestore) => typedCollection<NewsDoc>(collection(db, "marketNews")),
+  position: (db: Firestore, id: string) => typed<PositionDoc>(doc(db, "positions", id)),
+  positions: (db: Firestore) => typedCollection<PositionDoc>(collection(db, "positions")),
+  oracle: (db: Firestore, uid: string) => doc(db, "oracles", uid),
+  oracles: (db: Firestore) => collection(db, "oracles"),
 };

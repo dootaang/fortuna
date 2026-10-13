@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router";
 import { GoogleAuthProvider, signInWithPopup, signOut, type User } from "firebase/auth";
 import { type Timestamp } from "firebase/firestore";
 import { DEFAULT_ECONOMY, DEFAULT_NOTIFY, normalizeEconomy, normalizeNotify, type EconomyConfig, type NotifyConfig, type Wallet } from "@fortuna/core";
-import { economyNeedsUpgrade, refs, friendlyError, saveEconomy, type DistrictDoc, type PlayerDoc, type PoolDoc, type Session } from "@fortuna/data";
+import { economyNeedsUpgrade, ensureMarket, refs, friendlyError, saveEconomy, type DistrictDoc, type PlayerDoc, type PoolDoc, type Session } from "@fortuna/data";
 import { auth, clock, db, usingEmulators } from "../firebase.ts";
 import { useAuthUser } from "../session/auth.ts";
 import { useLiveDoc, useLiveQuery, type Row } from "../session/live.ts";
@@ -15,6 +15,7 @@ import { Districts } from "./Districts.tsx";
 import { ShopAdmin } from "./ShopAdmin.tsx";
 import { VaultAdmin } from "./VaultAdmin.tsx";
 import { Settings } from "./Settings.tsx";
+import { MarketAdmin } from "./MarketAdmin.tsx";
 
 export interface DealerData {
   session: Session;
@@ -106,6 +107,8 @@ function DealerData({ uid, email }: { uid: string; email: string }) {
   const rawConfig = config.status === "ready" ? config.data : null;
   useEffect(() => {
     if (rawConfig && economyNeedsUpgrade(rawConfig)) void saveEconomy({ db, uid, clock }, normalizeEconomy(rawConfig), null).catch(() => undefined);
+    // A city set up before the exchange gets its config/market with defaults.
+    if (rawConfig) void ensureMarket({ db, uid, clock }).catch(() => undefined);
   }, [rawConfig]);
 
   const value = useMemo<DealerData>(() => ({
@@ -130,6 +133,7 @@ const TABS = [
   { id: "ledger", label: "기록" },
   { id: "districts", label: "구역" },
   { id: "shop", label: "모금·상점" },
+  { id: "market", label: "거래소" },
   { id: "vault", label: "금고" },
   { id: "settings", label: "설정" },
 ] as const;
@@ -140,7 +144,7 @@ function DealerShell({ email }: { email: string }) {
   const tab = (TABS.some((entry) => entry.id === params.get("tab")) ? params.get("tab") : "overview") as TabId;
   const { configExists } = useDealer();
   const pages: Record<TabId, ReactNode> = {
-    overview: <Overview />, players: <Players />, ledger: <LedgerView />, districts: <Districts />, shop: <ShopAdmin />, vault: <VaultAdmin />, settings: <Settings />,
+    overview: <Overview />, players: <Players />, ledger: <LedgerView />, districts: <Districts />, shop: <ShopAdmin />, market: <MarketAdmin />, vault: <VaultAdmin />, settings: <Settings />,
   };
   return (
     <div className="min-h-dvh">
