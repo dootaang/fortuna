@@ -80,9 +80,10 @@ export interface TickOptions { world?: WorldInput | undefined; news?: Doc[] | un
 
 export async function recordTick(recorder: Recorder, atMs: number, options: TickOptions = {}, retry = true): Promise<TickResult> {
   const { fs, config } = recorder, tickMs = config.tickSeconds * 1000;
-  const seq = tickSeq(atMs, config.tickSeconds);
-  const base = recorder.state ?? initialMarketState(seq - 1, atMs - tickMs);
-  if (base.seq >= seq) return { status: "skipped", seq, feed: [], closed: [] };
+  // seq counts ticks; it does not depend on the interval, so the dealer can change the interval freely.
+  const base = recorder.state ?? initialMarketState(tickSeq(atMs, config.tickSeconds) - 1, atMs - tickMs);
+  const seq = base.seq + 1;
+  if (base.atMs >= atMs) return { status: "skipped", seq: base.seq, feed: [], closed: [] };
 
   const pending = options.news ?? [];
   const due = pending.filter((doc) => toMs(doc.data.publishAt) <= atMs);

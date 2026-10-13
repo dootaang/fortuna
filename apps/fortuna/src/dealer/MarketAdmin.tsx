@@ -6,7 +6,7 @@ import {
 } from "@fortuna/core";
 import { cancelNews, refs, registerOracle, saveMarket, scheduleNews, voidPosition, type NewsInput } from "@fortuna/data";
 import { useLiveDoc, useLiveQuery } from "../session/live.ts";
-import { Coins, Empty, Frame, Notice, NumberField, Stat, TextField, Toggle, cx, formatDate, useAction } from "../ui/kit.tsx";
+import { Coins, Empty, Frame, Notice, NumberField, Stat, TextField, Toggle, cx, formatDate, useAction, useToast } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
 
 export function MarketAdmin() {
@@ -203,8 +203,22 @@ function NewsDesk() {
   );
 }
 
+const FIELD_LABELS: [keyof MarketConfig, string][] = [
+  ["feeBps", "수수료"], ["minFee", "최소 수수료"], ["interestBps", "이자"], ["liquidationBps", "강제 청산"], ["capMultiple", "자동 익절"],
+  ["minMargin", "최소 증거금"], ["maxMargin", "최대 증거금"], ["maxOpen", "동시 포지션"], ["dailyLimit", "하루 새 거래"],
+  ["nightFeeMultiplier", "밤 수수료 배수"], ["tickSeconds", "시세 간격(10~60초)"], ["staleSeconds", "시세 유효 시간(20초 이상)"],
+];
+
+/** Labels of the fields normalizeMarket had to change (out of range or not a number). */
+function adjustedFields(draft: MarketConfig, saved: MarketConfig): string[] {
+  const fields = FIELD_LABELS.filter(([key]) => draft[key] !== saved[key]).map(([key, label]) => `${label} → ${String(saved[key])}`);
+  const leverage = (Object.keys(saved.leverage) as (keyof MarketConfig["leverage"])[]).some((key) => JSON.stringify(draft.leverage[key]) !== JSON.stringify(saved.leverage[key]));
+  return leverage ? [...fields, "배율"] : fields;
+}
+
 function MarketEditor({ market }: { market: MarketConfig }) {
   const { session } = useDealer();
+  const toast = useToast();
   const [draft, setDraft] = useState(market);
   const { busy, run } = useAction();
   const set = (patch: Partial<MarketConfig>) => setDraft({ ...draft, ...patch });
@@ -228,7 +242,7 @@ function MarketEditor({ market }: { market: MarketConfig }) {
           <NumberField label="최대 증거금" value={draft.maxMargin} onChange={(maxMargin) => set({ maxMargin })} min={1} suffix="코인" />
           <NumberField label="동시 포지션" value={draft.maxOpen} onChange={(maxOpen) => set({ maxOpen })} min={1} />
           <NumberField label="하루 새 거래" value={draft.dailyLimit} onChange={(dailyLimit) => set({ dailyLimit })} min={0} />
-          <NumberField label="시세 간격 (초)" value={draft.tickSeconds} onChange={(tickSeconds) => set({ tickSeconds })} min={15} max={60} />
+          <NumberField label="시세 간격 (초, 10~60)" value={draft.tickSeconds} onChange={(tickSeconds) => set({ tickSeconds })} min={10} max={60} />
           <NumberField label="시세 유효 시간 (초)" value={draft.staleSeconds} onChange={(staleSeconds) => set({ staleSeconds })} min={20} />
           <NumberField label="FTN 배율 (하우스 전)" value={draft.leverage.mainLocked} onChange={(mainLocked) => setLeverage({ mainLocked })} min={1} />
           <NumberField label="알트 배율 (하우스 전)" value={draft.leverage.altLocked} onChange={(altLocked) => setLeverage({ altLocked })} min={1} />
@@ -244,7 +258,11 @@ function MarketEditor({ market }: { market: MarketConfig }) {
             </div>
           ))}
         </div>
-        <button type="button" className="btn btn-gold mt-4" disabled={busy} onClick={() => void run(() => saveMarket(session, draft), "저장했습니다.")}>저장</button>
+        <button type="button" className="btn btn-gold mt-4" disabled={busy} onClick={() => void run(async () => {
+          await saveMarket(session, draft);
+          const fixed = adjustedFields(draft, normalizeMarket(draft));
+          toast(fixed.length ? "info" : "success", fixed.length ? `저장했습니다. 허용 범위를 벗어난 값은 바꿔 저장했습니다: ${fixed.join(", ")}` : "저장했습니다.");
+        })}>저장</button>
       </Frame>
     </section>
   );

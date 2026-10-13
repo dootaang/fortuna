@@ -108,6 +108,19 @@ describe("market clock", () => {
   });
 });
 
+describe("tick interval", () => {
+  it("keeps ticking when the dealer changes the interval down and back up", async () => {
+    const start = clockMs, seq0 = (await rootData(`market/h${Math.floor(start / 3_600_000)}`))!.last.seq;
+    recorder.config = { ...recorder.config, tickSeconds: 10 };
+    const fast = [await recordTick(recorder, start + 10_000), await recordTick(recorder, start + 20_000)];
+    recorder.config = { ...recorder.config, tickSeconds: 15 };
+    const slow = await recordTick(recorder, start + 30_000);
+    expect([...fast, slow].map((result) => result.status)).toEqual(["written", "written", "written"]);
+    expect([...fast, slow].map((result) => result.seq)).toEqual([seq0 + 1, seq0 + 2, seq0 + 3]);
+    expect((await recordTick(recorder, start + 30_000)).status).toBe("skipped");
+  });
+});
+
 describe("positions", () => {
   it("opens at the newest price and settles exactly", async () => {
     const vault0 = (await rootData("vault/main"))?.amount;

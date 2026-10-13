@@ -37,7 +37,7 @@ export interface MarketConfig {
   debtLink: boolean;
   /** Trading refuses a price older than this (the price recorder may be down). */
   staleSeconds: number;
-  /** Seconds between prices; the price recorder reads it. */
+  /** Seconds between prices (10–60); the price recorder reads it within a minute. */
   tickSeconds: number;
   /** Per coin: trading switch (circuit breaker) and a volatility multiplier. */
   coins: Record<CoinId, { enabled: boolean; volMult: number }>;
@@ -90,7 +90,7 @@ export function normalizeMarket(raw: unknown): MarketConfig {
     nightFeeMultiplier: int(source.nightFeeMultiplier, d.nightFeeMultiplier, 1, 10),
     debtLink: bool(source.debtLink, d.debtLink),
     staleSeconds: int(source.staleSeconds, d.staleSeconds, 20, 3_600),
-    tickSeconds: int(source.tickSeconds, d.tickSeconds, 15, 60),
+    tickSeconds: int(source.tickSeconds, d.tickSeconds, 10, 60),
     coins: Object.fromEntries(COIN_IDS.map((id) => {
       const stored = isRecord(coins[id]) ? coins[id] : {};
       return [id, { enabled: bool(stored.enabled, true), volMult: numberOr(stored.volMult, 1, 0, 5) }];

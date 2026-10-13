@@ -17,7 +17,7 @@ export interface CoinTick {
   /** Permanent anchor factor (liberation rallies). */
   af: number;
   storm: boolean;
-  /** Volatility boost and the tick it ends at (밸런스 패치, dealer news). */
+  /** Volatility boost and when it ends, epoch ms (밸런스 패치, dealer news). */
   boost: number;
   boostUntil: number;
   /** Smoothed recent return, for momentum. */
@@ -136,10 +136,11 @@ export function anchorOf(state: MarketState, id: CoinId, debtLink: boolean): num
 }
 
 export function stepMarket(state: MarketState, input: StepInput): { state: MarketState; feed: FeedItem[] } {
-  const ticks = input.seq - state.seq;
-  if (ticks <= 0) return { state, feed: [] };
+  // Elapsed time, not tick count, sets the step: the dealer may change the tick interval at any time.
   const { config, seq, atMs } = input, tickSeconds = config.tickSeconds;
-  const hours = (Math.min(ticks, 240) * tickSeconds) / 3600;
+  const elapsedMs = atMs - state.atMs;
+  if (seq <= state.seq || elapsedMs <= 0) return { state, feed: [] };
+  const hours = Math.min(elapsedMs, 3_600_000) / 3_600_000;
   const rng = new XorShift32(input.seeds.tick);
   const feed: FeedItem[] = [];
   const jump: Record<string, number> = {}, afMult: Record<string, number> = {};
@@ -171,17 +172,16 @@ export function stepMarket(state: MarketState, input: StepInput): { state: Marke
   const whisper = blcPlan(input.seeds.blcNow, tickSeconds);
   if (whisper.scheduled) feed.push({ kind: "blcWhisper", coin: "BLC", tone: "info", text: whisper.hint > 0 ? FEED_TEXT.blcWhisperUp : FEED_TEXT.blcWhisperDown });
   const due = blcPlan(input.seeds.blcPast, tickSeconds);
-  if (due.scheduled && ticks <= blcLagTicks(tickSeconds)) { addJump("BLC", 1 + due.dir * due.size); feed.push({ kind: "blcReveal", coin: "BLC", tone: due.dir > 0 ? "up" : "down", text: FEED_TEXT.blcReveal }); }
+  if (due.scheduled && elapsedMs <= 600_000) { addJump("BLC", 1 + due.dir * due.size); feed.push({ kind: "blcReveal", coin: "BLC", tone: due.dir > 0 ? "up" : "down", text: FEED_TEXT.blcReveal }); }
 
   const boosts: Partial<Record<CoinId, { boost: number; until: number }>> = {};
-  const ticksPerHour = Math.round(3600 / tickSeconds);
-  if (rng.next() < (2 * hours) / 24) { boosts.HBT = { boost: 1.5, until: seq + ticksPerHour }; feed.push({ kind: "hbtPatch", coin: "HBT", tone: "warn", text: FEED_TEXT.hbtPatch }); }
+  if (rng.next() < (2 * hours) / 24) { boosts.HBT = { boost: 1.5, until: atMs + 3_600_000 }; feed.push({ kind: "hbtPatch", coin: "HBT", tone: "warn", text: FEED_TEXT.hbtPatch }); }
 
   // Dealer news.
   for (const shock of input.news ?? []) {
     const dir = shock.dir === 0 ? (rng.next() < 0.5 ? 1 : -1) : shock.dir;
     addJump(shock.coin, 1 + dir * NEWS_SIZES[shock.size]);
-    boosts[shock.coin] = { boost: 2, until: seq + Math.round((shock.minutes * 60) / tickSeconds) };
+    boosts[shock.coin] = { boost: 2, until: atMs + shock.minutes * 60_000 };
     feed.push({ kind: "news", coin: shock.coin, tone: shock.dir === 0 || shock.size === "z" ? "info" : dir > 0 ? "up" : "down", text: shock.headline });
   }
 
@@ -196,7 +196,7 @@ export function stepMarket(state: MarketState, input: StepInput): { state: Marke
     const af = cs.af * (afMult[id] ?? 1);
     const anchor = anchorOf({ ...next, coins: { ...next.coins, [id]: { ...cs, af } } }, id, config.debtLink);
     const storm = cs.storm ? rng.next() >= Math.min(1, hours) : rng.next() < hours / 24;
-    const boost = boosts[id] ?? (seq < cs.boostUntil ? { boost: cs.boost, until: cs.boostUntil } : { boost: 1, until: 0 });
+    const boost = boosts[id] ?? (atMs < cs.boostUntil ? { boost: cs.boost, until: cs.boostUntil } : { boost: 1, until: 0 });
     const night = id === "MWL" && isMoonlessNight(atMs) ? 4 : 1;
     const vol = def.volH * (config.coins[id]?.volMult ?? 1) * (storm ? 2.5 : 1) * boost.boost * night * Math.sqrt(hours);
     const e = id === "FTN" ? common : def.beta * common + Math.sqrt(1 - def.beta * def.beta) * normal(rng);
