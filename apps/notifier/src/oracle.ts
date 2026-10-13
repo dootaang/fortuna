@@ -177,7 +177,9 @@ export async function runMinute(env: RecorderEnv, scheduledMs: number, post: typ
   const tickMs = recorder.config.tickSeconds * 1000;
   const observe = recorder.state === null || Math.floor(start / 60_000) % 10 === 0;
   const [world, news, notifyDoc] = await Promise.all([
-    observe ? observeWorld(fs, start) : Promise.resolve(undefined), fs.query("marketNews", { status: "pending" }), fs.get("config/notify"),
+    // Prices keep moving even if the world read or the news read fails this minute.
+    observe ? observeWorld(fs, start).catch((error) => { console.error("observe", error); return undefined; }) : Promise.resolve(undefined),
+    fs.query("marketNews", { status: "pending" }).catch(() => []), fs.get("config/notify").catch(() => null),
   ]);
   const notify = normalizeNotify(notifyDoc?.data);
   let written = 0, first = true;
