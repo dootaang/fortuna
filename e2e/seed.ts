@@ -14,7 +14,6 @@ export async function resetEmulators(): Promise<void> {
   await fetch(`http://${AUTH}/emulator/v1/projects/${PROJECT}/accounts`, { method: "DELETE" });
 }
 
-/** Register a uid as dealer the way the console would (rules bypassed with the emulator owner token). */
 /**
  * Signs in through the auth emulator's Google popup. The popup can render "Add new account"
  * before its handlers are wired, so a click may not open the form; retry until it does.
@@ -31,6 +30,7 @@ export async function signInWithGooglePopup(page: Page, email: string): Promise<
   await popup.getByRole("button", { name: /Sign in with Google/ }).click();
 }
 
+/** Register a uid as dealer the way the console would (rules bypassed with the emulator owner token). */
 export async function allowDealer(uid: string): Promise<void> {
   const response = await fetch(`http://${FIRESTORE}/v1/projects/${PROJECT}/databases/(default)/documents/admins?documentId=${uid}`, {
     method: "POST", headers: { Authorization: "Bearer owner", "Content-Type": "application/json" }, body: JSON.stringify({ fields: {} }),
