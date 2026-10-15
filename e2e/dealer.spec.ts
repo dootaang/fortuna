@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { allowDealer, playSomeGames, resetEmulators, seedCity } from "./seed.ts";
+import { allowDealer, playSomeGames, resetEmulators, seedCity, signInWithGooglePopup } from "./seed.ts";
 
 test("dealer: sign in, get allow-listed, register a player, audit and liberate", async ({ page }) => {
   await resetEmulators();
@@ -7,12 +7,7 @@ test("dealer: sign in, get allow-listed, register a player, audit and liberate",
   await playSomeGames(city.code);
 
   await page.goto("/dealer");
-  const popupPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Google로 로그인" }).click();
-  const popup = await popupPromise;
-  await popup.getByText("Add new account").click();
-  await popup.locator("#email-input").fill("gm@example.com");
-  await popup.getByRole("button", { name: /Sign in with Google/ }).click();
+  await signInWithGooglePopup(page, "gm@example.com");
 
   // Not yet allow-listed: the page shows the uid to paste into the console.
   await expect(page.getByRole("heading", { name: "딜러 등록이 필요합니다" })).toBeVisible();

@@ -1,3 +1,4 @@
+import { expect, type Page } from "@playwright/test";
 import { deleteApp, initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, GoogleAuthProvider, signInWithCredential } from "firebase/auth";
 import { connectFirestoreEmulator, getFirestore, terminate } from "firebase/firestore";
@@ -14,6 +15,22 @@ export async function resetEmulators(): Promise<void> {
 }
 
 /** Register a uid as dealer the way the console would (rules bypassed with the emulator owner token). */
+/**
+ * Signs in through the auth emulator's Google popup. The popup can render "Add new account"
+ * before its handlers are wired, so a click may not open the form; retry until it does.
+ */
+export async function signInWithGooglePopup(page: Page, email: string): Promise<void> {
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Google로 로그인" }).click();
+  const popup = await popupPromise;
+  await expect(async () => {
+    await popup.getByText("Add new account").click({ timeout: 2_000 });
+    await expect(popup.locator("#email-input")).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+  await popup.locator("#email-input").fill(email);
+  await popup.getByRole("button", { name: /Sign in with Google/ }).click();
+}
+
 export async function allowDealer(uid: string): Promise<void> {
   const response = await fetch(`http://${FIRESTORE}/v1/projects/${PROJECT}/databases/(default)/documents/admins?documentId=${uid}`, {
     method: "POST", headers: { Authorization: "Bearer owner", "Content-Type": "application/json" }, body: JSON.stringify({ fields: {} }),
