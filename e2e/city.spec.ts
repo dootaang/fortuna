@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { PLACE_IDS, PLACES } from "@fortuna/core";
-import { enterPlace, saveCharacter, sendMessage } from "@fortuna/data";
+import { getDoc } from "firebase/firestore";
+import { cityRefs, enterPlace, saveCharacter, sendMessage } from "@fortuna/data";
 import { playSomeGames, resetEmulators, seedCity, seedPlayers, withPlayer, type SeededCity } from "./seed.ts";
 
 let city: SeededCity;
@@ -43,6 +44,18 @@ test("city: make a character, walk, talk, roll, and see every place", async ({ p
   const box = (await map.boundingBox())!;
   await page.mouse.click(box.x + box.width * 0.7, box.y + box.height * 0.75);
   await page.waitForTimeout(1_500);
+
+  // Keyboard: hold the left arrow (or A) to walk straight, let go to stop.
+  const where = () => withPlayer(city.code, async (session) => (await getDoc(cityRefs.actor(session.db, session.pid))).data()!);
+  const before = await where();
+  await page.keyboard.down("ArrowLeft");
+  await page.waitForTimeout(700);
+  await page.keyboard.up("ArrowLeft");
+  await page.waitForTimeout(600);
+  const after = await where();
+  expect(after.tx).toBeLessThan(before.tx);
+  expect(after.tx).toBe(after.fx); // stopped
+  await page.keyboard.press("KeyW");
 
   // Talk, act, roll.
   const input = page.getByLabel("메시지");

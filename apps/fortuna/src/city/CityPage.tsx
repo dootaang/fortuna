@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PLACES, TILE, exitAt, gridOf, mapSize, resolveTarget, walkPose, type Cell, type Exit, type PlaceId } from "@fortuna/core";
 import { enterPlace, placeChannel, walkTo } from "@fortuna/data";
+import { KEY_DIRECTIONS, localPose, startWalk, straightTarget, type LocalPose, type LocalWalk } from "./walker.ts";
 import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
 import { Splash, cx, useToast } from "../ui/kit.tsx";
@@ -33,13 +34,6 @@ function CityView({ me, actors, onEdit }: { me: ActorRow; actors: ActorRow[]; on
   const [chatTall, setChatTall] = useState(false);
   useCityHeartbeat(true);
 
-  async function walk(from: Cell, tapped: Cell) {
-    const target = resolveTarget(gridOf(place), from, tapped);
-    if (target[0] === from[0] && target[1] === from[1]) return;
-    cue("tap");
-    await walkTo(session, from, target).catch(() => toast("error", "걸음을 옮기지 못했습니다. 잠시 후 다시 시도해 주세요."));
-  }
-
   async function exit(door: Exit) {
     cue("flip");
     await enterPlace(session, door.to, door.at).catch(() => toast("error", "문을 열지 못했습니다."));
@@ -48,7 +42,7 @@ function CityView({ me, actors, onEdit }: { me: ActorRow; actors: ActorRow[]; on
   return (
     <div className={cx("city-shell", chatTall && "city-chat-tall")}>
       <div className="city-map relative">
-        <MapView place={place} rows={here} meId={me.id} bubbles={bubbles} onWalk={walk} onExit={exit} />
+        <MapView place={place} rows={here} meId={me.id} bubbles={bubbles} onExit={exit} />
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-2">
           <div className="city-plate pointer-events-auto">
             <p className="deco-caps text-[0.58rem]">{PLACES[place].district}</p>
@@ -77,23 +71,77 @@ function CityView({ me, actors, onEdit }: { me: ActorRow; actors: ActorRow[]; on
   );
 }
 
-function MapView({ place, rows, meId, bubbles, onWalk, onExit }: {
-  place: PlaceId; rows: ActorRow[]; meId: string; bubbles: MessageRow[];
-  onWalk: (from: Cell, to: Cell) => void; onExit: (exit: Exit) => void;
+function MapView({ place, rows, meId, bubbles, onExit }: {
+  place: PlaceId; rows: ActorRow[]; meId: string; bubbles: MessageRow[]; onExit: (exit: Exit) => void;
 }) {
   const { session } = usePlayer();
+  const toast = useToast();
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [zoom, setZoom] = useState(() => (window.innerWidth < 640 ? 2 : 3));
-  const live = useRef({ rows, bubbles, place, zoom, onWalk, onExit });
-  live.current = { rows, bubbles, place, zoom, onWalk, onExit };
+  const live = useRef({ rows, bubbles, place, zoom, onExit });
+  live.current = { rows, bubbles, place, zoom, onExit };
   const camera = useRef<{ x: number; y: number } | null>(null);
   const follow = useRef(true);
-  const myCell = useRef<Cell>([0, 0]);
+  /** My own walk, played on this device from the moment of the tap or key press. */
+  const local = useRef<LocalWalk | null>(null);
+  const myPose = useRef<LocalPose | null>(null);
   const handledExit = useRef("");
+  const keys = useRef<Cell[]>([]);
   const drag = useRef<{ x: number; y: number; cx: number; cy: number; moved: boolean } | null>(null);
 
-  useEffect(() => { camera.current = null; follow.current = true; }, [place]);
+  useEffect(() => { camera.current = null; follow.current = true; local.current = null; }, [place]);
+
+  // When the stored walk is not the one being played (moved from another device), follow the server.
+  const mine = rows.find((row) => row.id === meId)?.data;
+  useEffect(() => {
+    const walk = local.current;
+    if (walk && mine && (mine.place !== walk.place || mine.tx !== walk.target[0] || mine.ty !== walk.target[1])) local.current = null;
+  }, [mine?.place, mine?.tx, mine?.ty]);
+
+  /** Walk from wherever I am (even between two cells) toward `target`, and tell the server. */
+  function go(target: Cell) {
+    const pose = myPose.current, id = live.current.place;
+    if (!pose) return;
+    const grid = gridOf(id), goal = resolveTarget(grid, pose.heading, target);
+    const started = startWalk(grid, id, pose, goal, performance.now());
+    if (!started) return;
+    local.current = started.walk;
+    follow.current = true;
+    void walkTo(session, started.from, goal).catch(() => toast("error", "걸음을 옮기지 못했습니다. 잠시 후 다시 시도해 주세요."));
+  }
+  const goRef = useRef(go);
+  goRef.current = go;
+
+  // Keyboard: arrows or WASD walk straight while held; letting go stops at the next cell.
+  useEffect(() => {
+    const typing = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+    const steer = () => {
+      const pose = myPose.current, dir = keys.current.at(-1);
+      if (!pose) return;
+      if (!dir) { if (pose.moving) goRef.current(pose.heading); return; }
+      goRef.current(straightTarget(gridOf(live.current.place), pose.heading, dir[0], dir[1]));
+    };
+    const down = (event: KeyboardEvent) => {
+      const dir = KEY_DIRECTIONS[event.code];
+      if (!dir || typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      if (event.repeat || keys.current.includes(dir)) return;
+      keys.current = [...keys.current, dir];
+      steer();
+    };
+    const up = (event: KeyboardEvent) => {
+      const dir = KEY_DIRECTIONS[event.code];
+      if (!dir || !keys.current.includes(dir)) return;
+      keys.current = keys.current.filter((held) => held !== dir);
+      steer();
+    };
+    const release = () => { if (keys.current.length) { keys.current = []; steer(); } };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", release);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", release); };
+  }, []);
 
   useEffect(() => {
     let frameId = 0;
@@ -106,28 +154,34 @@ function MapView({ place, rows, meId, bubbles, onWalk, onExit }: {
       const ctx = el.getContext("2d");
       if (!ctx) return;
       const { rows: current, bubbles: said, place: id, zoom: z } = live.current;
-      const scene = sceneOf(id), grid = gridOf(id), now = session.clock.now();
+      const scene = sceneOf(id), grid = gridOf(id), now = session.clock.now(), perf = performance.now();
       const recent = new Map<string, string>();
-      for (const message of said) if ((message.data.kind === "say" || message.data.kind === "act") && !message.data.deleted && now - message.atMs < BUBBLE_MS) recent.set(message.data.authorId, (message.data.kind === "act" ? `*${message.data.text}*` : message.data.text).split("\n")[0]!);
-      let mine: SceneActor | null = null;
+      for (const message of said) {
+        if ((message.data.kind === "say" || message.data.kind === "act") && !message.data.deleted && now - message.atMs < BUBBLE_MS) {
+          recent.set(message.data.authorId, (message.data.kind === "act" ? `*${message.data.text}*` : message.data.text).split("\n")[0]!);
+        }
+      }
+      let mineActor: SceneActor | null = null;
       const actors = current.map((row): SceneActor => {
-        const d = row.data, pose = walkPose(grid, id, [d.fx, d.fy], [d.tx, d.ty], now - row.atMs);
+        const d = row.data, me = row.id === meId;
+        const walk = me && local.current?.place === id ? local.current : null;
+        const pose: LocalPose = walk ? localPose(walk, perf) : walkPose(grid, id, [d.fx, d.fy], [d.tx, d.ty], now - row.atMs);
         const actor: SceneActor = {
           id: row.id, name: d.name, sprite: d.sprite, x: pose.x, y: pose.y, facing: pose.facing, frame: walkFrame(pose.step, pose.moving),
-          away: now - row.seenMs > AWAY_MS, me: row.id === meId, bubble: recent.get(row.id) ?? null,
+          away: now - row.seenMs > AWAY_MS, me, bubble: recent.get(row.id) ?? null,
         };
-        if (actor.me) {
-          mine = actor; myCell.current = pose.cell;
+        if (me) {
+          mineActor = actor; myPose.current = pose;
           const door = pose.arrived ? exitAt(PLACES[id], pose.cell[0], pose.cell[1]) : null;
-          const key = `${id}:${row.atMs}:${pose.cell}`;
-          if (door && handledExit.current !== key) { handledExit.current = key; live.current.onExit(door); }
+          const key = `${id}:${walk ? walk.start : row.atMs}:${pose.cell}`;
+          if (door && handledExit.current !== key) { handledExit.current = key; keys.current = []; live.current.onExit(door); }
         }
         return actor;
       });
       // Camera: follow my character smoothly, never show past the map edge.
       const { width, height } = mapSize(PLACES[id]), worldW = width * TILE, worldH = height * TILE;
       const viewW = cssW / z, viewH = cssH / z;
-      const me = mine as SceneActor | null;
+      const me = mineActor as SceneActor | null;
       const target = me && follow.current ? { x: me.x * TILE + 8, y: me.y * TILE } : camera.current ?? { x: worldW / 2, y: worldH / 2 };
       const cam = camera.current ?? { ...target };
       if (follow.current) { cam.x += (target.x - cam.x) * 0.18; cam.y += (target.y - cam.y) * 0.18; }
@@ -153,7 +207,7 @@ function MapView({ place, rows, meId, bubbles, onWalk, onExit }: {
   return (
     <div ref={box} className="absolute inset-0 touch-none select-none">
       <canvas
-        ref={canvas} className="pixelated block h-full w-full cursor-pointer" role="img" aria-label={`${PLACES[place].name} 지도. 누르면 그곳으로 걸어간다.`}
+        ref={canvas} className="pixelated block h-full w-full cursor-pointer" role="img" aria-label={`${PLACES[place].name} 지도. 누르거나 방향키·WASD로 걷는다.`}
         onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); const cam = camera.current; drag.current = { x: event.clientX, y: event.clientY, cx: cam?.x ?? 0, cy: cam?.y ?? 0, moved: false }; }}
         onPointerMove={(event) => {
           const d = drag.current;
@@ -167,9 +221,7 @@ function MapView({ place, rows, meId, bubbles, onWalk, onExit }: {
           drag.current = null;
           if (!d || d.moved) return;
           const tile = tileAt(event.clientX, event.clientY);
-          if (!tile) return;
-          follow.current = true;
-          onWalk(myCell.current, tile);
+          if (tile) { cue("tap"); go(tile); }
         }}
         onPointerCancel={() => { drag.current = null; }}
       />
@@ -177,6 +229,7 @@ function MapView({ place, rows, meId, bubbles, onWalk, onExit }: {
         <button type="button" className="city-btn" aria-label="축소" disabled={zoom <= 1} onClick={() => setZoom((value) => Math.max(1, value - 1))}>−</button>
         <button type="button" className="city-btn" aria-label="확대" disabled={zoom >= 4} onClick={() => setZoom((value) => Math.min(4, value + 1))}>＋</button>
         <button type="button" className="city-btn" aria-label="내 캐릭터로" onClick={() => { follow.current = true; }}>◎</button>
+        <span className="city-plate hidden self-center text-[0.7rem] text-mist md:inline">방향키·WASD로 걷기</span>
       </div>
     </div>
   );

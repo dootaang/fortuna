@@ -98,7 +98,7 @@ export function resolveTarget(grid: Grid, from: Cell, tapped: Cell): Cell {
   return best;
 }
 
-export interface WalkPose { x: number; y: number; cell: Cell; facing: Facing; moving: boolean; step: number; arrived: boolean; }
+export interface WalkPose { x: number; y: number; cell: Cell; facing: Facing; moving: boolean; step: number; arrived: boolean; /** The cell being walked into (the end cell once arrived). */ heading: Cell; }
 
 const pathCache = new Map<string, Cell[] | null>();
 function cachedPath(grid: Grid, key: string, from: Cell, to: Cell): Cell[] | null {
@@ -123,12 +123,12 @@ export function walkPose(grid: Grid, placeKey: string, from: Cell, to: Cell, ela
   const travelled = Math.max(0, (elapsedMs / 1000) * WALK_SPEED), last = path.length - 1;
   if (travelled >= last) {
     const end = path[last]!, before = path[last - 1] ?? end;
-    return { x: end[0], y: end[1], cell: end, facing: last ? facingOf(end[0] - before[0], end[1] - before[1], rest) : rest, moving: false, step: 0, arrived: true };
+    return { x: end[0], y: end[1], cell: end, facing: last ? facingOf(end[0] - before[0], end[1] - before[1], rest) : rest, moving: false, step: 0, arrived: true, heading: end };
   }
   const index = Math.floor(travelled), t = travelled - index, a = path[index]!, b = path[index + 1]!;
   return {
     x: a[0] + (b[0] - a[0]) * t, y: a[1] + (b[1] - a[1]) * t, cell: t < 0.5 ? a : b,
-    facing: facingOf(b[0] - a[0], b[1] - a[1], rest), moving: true, step: Math.floor(travelled * 2) % 4, arrived: false,
+    facing: facingOf(b[0] - a[0], b[1] - a[1], rest), moving: true, step: Math.floor(travelled * 2) % 4, arrived: false, heading: b,
   };
 }
 
