@@ -16,6 +16,7 @@ import { ShopAdmin } from "./ShopAdmin.tsx";
 import { VaultAdmin } from "./VaultAdmin.tsx";
 import { Settings } from "./Settings.tsx";
 import { MarketAdmin } from "./MarketAdmin.tsx";
+import { CityAdmin } from "./CityAdmin.tsx";
 
 export interface DealerData {
   session: Session;
@@ -134,6 +135,7 @@ const TABS = [
   { id: "districts", label: "구역" },
   { id: "shop", label: "모금·상점" },
   { id: "market", label: "거래소" },
+  { id: "city", label: "도시" },
   { id: "vault", label: "금고" },
   { id: "settings", label: "설정" },
 ] as const;
@@ -144,7 +146,7 @@ function DealerShell({ email }: { email: string }) {
   const tab = (TABS.some((entry) => entry.id === params.get("tab")) ? params.get("tab") : "overview") as TabId;
   const { configExists } = useDealer();
   const pages: Record<TabId, ReactNode> = {
-    overview: <Overview />, players: <Players />, ledger: <LedgerView />, districts: <Districts />, shop: <ShopAdmin />, market: <MarketAdmin />, vault: <VaultAdmin />, settings: <Settings />,
+    overview: <Overview />, players: <Players />, ledger: <LedgerView />, districts: <Districts />, shop: <ShopAdmin />, market: <MarketAdmin />, city: <CityAdmin />, vault: <VaultAdmin />, settings: <Settings />,
   };
   return (
     <div className="min-h-dvh">

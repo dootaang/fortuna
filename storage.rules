@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// 장면 이미지: 각자 자기 폴더(uploads/{uid})에만 올린다. 어디에 쓰일지는 Firestore sceneImages 규칙이 정한다.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /uploads/{uid}/{file} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.size < 3 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

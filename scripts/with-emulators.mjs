@@ -14,7 +14,7 @@ const isWindows = process.platform === "win32";
 const command = process.argv.slice(2).join(" ");
 if (!command) { console.error("usage: with-emulators.mjs <command>"); process.exit(2); }
 
-const emulators = spawn(`corepack pnpm exec firebase emulators:start --only auth,firestore --project ${PROJECT}`, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
+const emulators = spawn(`corepack pnpm exec firebase emulators:start --only auth,firestore,storage --project ${PROJECT}`, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
 let log = "";
 emulators.stdout.on("data", (chunk) => { log += chunk; });
 emulators.stderr.on("data", (chunk) => { log += chunk; });
@@ -40,6 +40,7 @@ async function ready(url) {
 try {
   await ready(`http://${FIRESTORE}/`);
   await ready(`http://${AUTH}/`);
+  await ready("http://127.0.0.1:9199/");
   const child = spawn(command, { shell: true, stdio: "inherit", env: { ...process.env, FIRESTORE_EMULATOR_HOST: FIRESTORE, FIREBASE_AUTH_EMULATOR_HOST: AUTH, GCLOUD_PROJECT: PROJECT } });
   const code = await new Promise((resolve) => child.on("exit", resolve));
   stop();

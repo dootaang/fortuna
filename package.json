@@ -9,14 +9,14 @@
   },
   "scripts": {
     "dev": "corepack pnpm --filter @fortuna/web dev",
-    "dev:emu": "firebase emulators:start --only auth,firestore --project demo-fortuna",
+    "dev:emu": "firebase emulators:start --only auth,firestore,storage --project demo-fortuna",
     "build": "corepack pnpm -r --if-present build",
     "typecheck": "corepack pnpm -r typecheck",
     "test": "corepack pnpm -r --filter !@fortuna/rules-tests test",
     "test:rules": "node scripts/with-emulators.mjs corepack pnpm --filter @fortuna/rules-tests test",
     "check": "corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:rules && corepack pnpm build",
     "test:e2e": "node scripts/with-emulators.mjs corepack pnpm exec playwright test",
-    "release": "corepack pnpm build && firebase deploy --only hosting,firestore"
+    "release": "corepack pnpm build && firebase deploy --only hosting,firestore,storage"
   },
   "devDependencies": {
     "@fortuna/core": "workspace:*",

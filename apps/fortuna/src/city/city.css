@@ -1,4 +1,4 @@
-/* 도시: 휴대폰은 위 지도 · 아래 채팅, 넓은 화면은 왼쪽 지도 · 오른쪽 채팅 */
+/* 도시 2판: 노선도와 장면 카드. 휴대폰은 위 장면 · 아래 채팅, 넓은 화면은 왼쪽 장면 · 오른쪽 채팅. */
 @layer components {
   .pixelated { image-rendering: pixelated; image-rendering: crisp-edges; }
 
@@ -6,15 +6,15 @@
     position: fixed; left: 0; right: 0; top: var(--hdr, 57px); bottom: var(--nav, 61px); z-index: 10;
     display: flex; flex-direction: column; background: #0b0809;
   }
-  .city-map { flex: 0 0 55%; min-height: 0; border-bottom: 1px solid var(--gold-line); }
-  .city-chat { flex: 1 1 auto; min-height: 0; }
-  .city-chat-tall .city-map { flex-basis: 30%; }
+  .city-stage { flex: 0 0 auto; min-height: 0; display: flex; flex-direction: column; border-bottom: 1px solid var(--gold-line); }
+  .city-chat { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   @media (min-width: 768px) {
     .city-shell { flex-direction: row; }
-    .city-map { flex: 1 1 auto; border-bottom: 0; border-right: 1px solid var(--gold-line); }
-    .city-chat { flex: 0 0 380px; }
-    .city-chat-tall .city-map { flex-basis: auto; }
+    .city-stage { flex: 1 1 auto; border-bottom: 0; border-right: 1px solid var(--gold-line); overflow-y: auto; }
+    .city-chat { flex: 0 0 400px; }
   }
+  .city-chat-tall .scene-card { aspect-ratio: 4 / 1; }
+  .city-chat-tall .scene-caption p:last-child { display: none; }
 
   .city-plate {
     border: 1px solid var(--gold-line); border-radius: 3px; padding: 0.3rem 0.55rem;
@@ -22,9 +22,103 @@
     box-shadow: inset 0 0 0 2px color-mix(in oklab, #000 60%, transparent);
   }
   .city-btn {
-    display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: 3px;
-    border: 1px solid var(--gold-line); color: var(--color-gold-200);
-    background: color-mix(in oklab, var(--color-felt-950) 85%, transparent); font-size: 1rem;
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem; white-space: nowrap;
+    min-width: 2.25rem; height: 2.25rem; padding: 0 0.5rem; border-radius: 3px;
+    border: 1px solid var(--gold-line); color: var(--color-gold-200); font-size: 0.85rem;
+    background: color-mix(in oklab, var(--color-felt-950) 85%, transparent);
   }
   .city-btn:disabled { opacity: 0.4; }
+  .city-btn[aria-pressed="true"] { background: color-mix(in oklab, var(--color-gold-400) 25%, transparent); }
+
+  /* ── 장면 카드 ── */
+  .scene-card {
+    position: relative; margin: 0; overflow: hidden; aspect-ratio: 2 / 1; max-height: 46vh; width: 100%;
+    background: #050405; isolation: isolate; transition: aspect-ratio 0.3s;
+  }
+  @media (min-width: 768px) { .scene-card { aspect-ratio: 16 / 9; max-height: none; } }
+  .scene-art { position: absolute; inset: 0; animation: scene-in 0.9s ease-out; }
+  .scene-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; animation: scene-in 0.9s ease-out; }
+  .scene-tint {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse at 50% 35%, transparent 35%, rgba(5, 4, 5, 0.7) 100%),
+      linear-gradient(180deg, color-mix(in oklab, var(--line-dark) 45%, transparent), transparent 40%, rgba(5, 4, 5, 0.75));
+    mix-blend-mode: multiply;
+  }
+  .scene-frame { position: absolute; inset: 0.45rem; pointer-events: none; border: 1px solid var(--gold-line); box-shadow: inset 0 0 0 3px rgba(5, 4, 5, 0.55), inset 0 0 0 4px var(--gold-faint); }
+  .scene-frame span { position: absolute; width: 1.1rem; height: 1.1rem; border-color: var(--color-gold-300); border-style: solid; }
+  .scene-frame span:nth-child(1) { left: -1px; top: -1px; border-width: 2px 0 0 2px; }
+  .scene-frame span:nth-child(2) { right: -1px; top: -1px; border-width: 2px 2px 0 0; }
+  .scene-frame span:nth-child(3) { left: -1px; bottom: -1px; border-width: 0 0 2px 2px; }
+  .scene-frame span:nth-child(4) { right: -1px; bottom: -1px; border-width: 0 2px 2px 0; }
+  .scene-caption {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 2.2rem 1.1rem 0.85rem;
+    background: linear-gradient(180deg, transparent, rgba(5, 4, 5, 0.88) 55%); text-shadow: 0 1px 6px #000;
+  }
+  .scene-caption-compact { padding-top: 1.2rem; padding-bottom: 0.6rem; }
+  .scene-credit { position: absolute; right: 0.9rem; top: 0.75rem; font-size: 0.6rem; color: rgba(243, 234, 210, 0.55); max-width: 50%; text-align: right; text-shadow: 0 1px 3px #000; }
+  @keyframes scene-in { from { opacity: 0; transform: scale(1.03); } to { opacity: 1; transform: none; } }
+
+  /* 한 번 효과 */
+  .scene-pulse-shake { animation: scene-shake 0.55s cubic-bezier(.36, .07, .19, .97) 2; }
+  @keyframes scene-shake {
+    10%, 90% { transform: translate(-2px, 1px); } 20%, 80% { transform: translate(4px, -2px); }
+    30%, 50%, 70% { transform: translate(-6px, 2px); } 40%, 60% { transform: translate(6px, -1px); }
+  }
+  .scene-pulse-gold::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3;
+    background: radial-gradient(circle at 50% 45%, rgba(241, 217, 138, 0.85), rgba(212, 175, 55, 0.25) 45%, transparent 70%);
+    animation: scene-gold 1.6s ease-out forwards;
+  }
+  @keyframes scene-gold { 0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* 계속 효과 */
+  .scene-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+  .scene-overlay-alarm { animation: scene-alarm 1.4s ease-in-out infinite; background: radial-gradient(ellipse at center, transparent 40%, rgba(196, 40, 40, 0.55)); }
+  @keyframes scene-alarm { 50% { opacity: 0.2; } }
+  .scene-fx-blackout .scene-art { filter: brightness(0.18) saturate(0.4); transition: filter 0.6s; }
+  .scene-overlay-blackout { background: radial-gradient(circle at 50% 60%, rgba(255, 210, 120, 0.12), transparent 28%); animation: scene-flicker 4s steps(1) infinite; }
+  @keyframes scene-flicker { 0%, 100% { opacity: 1; } 41% { opacity: 0.3; } 43% { opacity: 1; } 77% { opacity: 0.5; } }
+  .scene-overlay-rain {
+    background-image: repeating-linear-gradient(105deg, transparent 0 22px, rgba(200, 220, 255, 0.22) 22px 23px, transparent 23px 47px);
+    background-size: 200% 200%; animation: scene-rain 0.5s linear infinite; mix-blend-mode: screen;
+  }
+  .scene-fx-rain .scene-art { filter: saturate(0.7) brightness(0.8); }
+  @keyframes scene-rain { from { background-position: 0 0; } to { background-position: -40px 120px; } }
+  .scene-overlay-fog {
+    background: radial-gradient(ellipse at 20% 70%, rgba(220, 225, 215, 0.35), transparent 55%), radial-gradient(ellipse at 80% 60%, rgba(220, 225, 215, 0.3), transparent 50%);
+    background-size: 160% 100%; animation: scene-fog 14s ease-in-out infinite alternate;
+  }
+  @keyframes scene-fog { from { background-position: 0 0; } to { background-position: 100% 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .scene-pulse-shake, .scene-overlay, .scene-art, .scene-img { animation: none !important; }
+  }
+
+  /* 얼굴 */
+  .face { display: inline-block; flex: none; border-radius: 3px; border: 1px solid var(--gold-faint); background: rgba(5, 4, 5, 0.6); object-fit: cover; }
+  .face-npc { border-color: var(--gold-line); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
+  .face-speaking { outline: 2px solid var(--color-gold-300); outline-offset: 1px; box-shadow: 0 0 12px -2px var(--color-gold-400); }
+
+  /* 노선도 */
+  .line-map { width: 100%; height: 100%; touch-action: manipulation; user-select: none; }
+  .line-map .stop { cursor: pointer; }
+  .line-map .stop:focus-visible circle.ring { stroke: #fff; stroke-width: 4; }
+  .line-map .stop-unread { animation: stop-blink 1.6s ease-in-out infinite; }
+  @keyframes stop-blink { 50% { opacity: 0.25; } }
+  .line-map .closed { opacity: 0.28; }
+
+  /* 채팅 카드 */
+  .narration {
+    margin: 0.25rem 0; padding: 0.5rem 0.75rem; text-align: center; font-style: italic; color: var(--color-gold-50);
+    border-top: 1px solid var(--gold-faint); border-bottom: 1px solid var(--gold-faint);
+    background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.08), transparent);
+  }
+  .result-card {
+    padding: 0.45rem 0.7rem; border: 1px solid var(--gold-line); border-left-width: 4px; border-radius: 3px;
+    background: rgba(212, 175, 55, 0.08); color: var(--color-ivory, #f3ead2);
+  }
+  .skill-stamp {
+    margin-top: 0.15rem; padding: 0.4rem 0.6rem; border: 1px dashed var(--gold-line); border-radius: 3px;
+    background: repeating-linear-gradient(135deg, rgba(212, 175, 55, 0.06) 0 8px, transparent 8px 16px);
+  }
 }

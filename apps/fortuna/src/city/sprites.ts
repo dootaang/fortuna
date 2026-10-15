@@ -1,4 +1,4 @@
-import { HAIR_COLORS, OUTFIT_COLORS, SKIN_TONES, spriteKey, type Facing, type SpriteChoice } from "@fortuna/core";
+import { HAIR_COLORS, OUTFIT_COLORS, SKIN_TONES, spriteKey, type SpriteChoice } from "@fortuna/core";
 import { Pix, shade } from "./pix.ts";
 
 /**
@@ -7,6 +7,7 @@ import { Pix, shade } from "./pix.ts";
  */
 export const SPRITE_W = 16, SPRITE_H = 24;
 type View = "down" | "up" | "left";
+export type Facing = "down" | "up" | "left" | "right";
 
 const OUTLINE = "#1a1210", SHOE = "#2a1d17", WHITE = "#f3ead2";
 
@@ -231,9 +232,6 @@ export function spriteCanvas(choice: SpriteChoice, facing: Facing, frame: number
   }
   return canvas;
 }
-
-/** Walk cycle: stand, left, stand, right. */
-export function walkFrame(step: number, moving: boolean): number { return moving ? [1, 0, 2, 0][step % 4]! : 0; }
 
 const faces = new Map<string, string>();
 

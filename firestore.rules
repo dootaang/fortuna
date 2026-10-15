@@ -960,51 +960,139 @@ service cloud.firestore {
         && getAfter(holdingPath(e.playerId, d.coin)).data.lastLedger == entryId;
     }
 
-    // ── 도시 지도와 RP 채팅 ── (docs/SPEC-CITY-MAP.md) 코인은 움직이지 않는다. 이동은 꾸밈이라 자기 말인지와 형식만 본다.
+    // ── 도시: 노선도와 장면 ── (docs/SPEC-CITY-MAP.md 2판) 코인은 특기 결제 장부로만 움직인다.
     function cityPlayer() { return signedIn() && exists(bindingPath()) && isPlayer(myPid()); }
+    function channelPublic(c) { return c == 'global' || c.matches('place:[a-z0-9-]{1,40}'); }
+    function whisperFor(c) { return c.matches('whisper:.+') && c.split(':')[1].split('~').hasAny([myPid()]); }
+    function sessionLive(id) {
+      let s = get(/databases/$(database)/documents/sessions/$(id)).data;
+      return s.closedAt == null && s.closesAt > request.time;
+    }
+    function imagePath(id) { return /databases/$(database)/documents/sceneImages/$(id); }
 
     match /actors/{pid} {
       allow read: if isAdmin() || cityPlayer();
-      allow create: if signedIn() && isPlayer(pid) && actorOk(pid, request.resource.data)
-        && request.resource.data.at == request.time;
-      allow update: if signedIn() && isPlayer(pid) && actorOk(pid, request.resource.data)
-        && (request.resource.data.at == request.time || request.resource.data.at == resource.data.at);
+      allow create, update: if signedIn() && isPlayer(pid) && actorOk(pid, request.resource.data);
       allow delete: if isAdmin();
     }
 
+    // 1판(걷는 지도)의 칸 필드(fx…at)가 남아 있는 문서도 고칠 수 있게 허용 목록에 둔다.
     function actorOk(pid, a) {
-      return a.keys().hasOnly(['kind', 'name', 'sprite', 'place', 'fx', 'fy', 'tx', 'ty', 'at', 'seenAt'])
+      return a.keys().hasOnly(['kind', 'name', 'sprite', 'portrait', 'place', 'seenAt', 'fx', 'fy', 'tx', 'ty', 'at'])
         && a.kind == 'pc' && a.name == get(playerPath(pid)).data.name
         && a.sprite is map && a.sprite.keys().hasOnly(['skin', 'hair', 'hairColor', 'outfit', 'outfitColor', 'accessory'])
+        && (a.get('portrait', null) == null || (a.portrait is string && get(imagePath(a.portrait)).data.owner == 'player' && get(imagePath(a.portrait)).data.ref == pid))
         && a.place is string && a.place.matches('[a-z0-9-]{1,40}')
-        && cellOk(a.fx) && cellOk(a.fy) && cellOk(a.tx) && cellOk(a.ty)
         && a.seenAt == request.time;
     }
-    function cellOk(n) { return n is int && n >= 0 && n < 200; }
+
+    match /reads/{pid} {
+      allow read: if isAdmin() || (signedIn() && isPlayer(pid));
+      allow write: if signedIn() && isPlayer(pid) && request.resource.data.size() <= 60;
+    }
+
+    match /placeActivity/{place} {
+      allow read: if isAdmin() || cityPlayer();
+      allow write: if (isAdmin() || cityPlayer())
+        && request.resource.data.keys().hasOnly(['lastAt', 'lastName'])
+        && request.resource.data.lastAt == request.time
+        && request.resource.data.lastName is string && request.resource.data.lastName.size() <= 40;
+    }
 
     match /messages/{id} {
-      allow read: if isAdmin() || cityPlayer();
-      allow create: if cityPlayer() && messageOk(request.resource.data);
-      // 주사위는 고치거나 지울 수 없다(결과가 메시지 id와 시각에 묶여 있다).
-      allow update: if cityPlayer() && resource.data.authorId == myPid() && editOk(resource.data, request.resource.data);
+      // 공개 채널은 같은 도시 사람 모두, 귓속말은 두 사람과 딜러만. 1판 메시지(public 없음)도 채널로 판단한다.
+      allow read: if isAdmin() || (cityPlayer() && (channelPublic(resource.data.channel) || resource.data.public == true || whisperFor(resource.data.channel)));
+      allow create: if (cityPlayer() && playerMessageOk(id, request.resource.data)) || (isAdmin() && dealerMessageOk(request.resource.data));
+      allow update: if (cityPlayer() && resource.data.authorId == myPid() && editOk(resource.data, request.resource.data))
+        || (isAdmin() && resource.data.authorId == request.auth.uid && editOk(resource.data, request.resource.data))
+        || ((cityPlayer() || isAdmin()) && onlyChanged(resource.data, request.resource.data, ['pinned']) && request.resource.data.pinned is bool);
       allow delete: if false;
     }
 
-    function messageOk(m) {
-      return m.keys().hasOnly(['channel', 'kind', 'authorId', 'authorName', 'text', 'at', 'editedAt', 'deleted'])
-        && m.authorId == myPid() && m.authorName == get(playerPath(myPid())).data.name
-        && m.channel is string && (m.channel == 'global' || m.channel.matches('place:[a-z0-9-]{1,40}'))
-        && m.kind in ['say', 'act', 'roll']
-        && m.text is string && m.text.size() >= 1 && m.text.size() <= 2000
-        && (m.kind != 'roll' || m.text.matches('[0-9]{1,2}d[0-9]{1,3}([+-][0-9]{1,3})?'))
-        && m.at == request.time && m.editedAt == null && m.deleted == false;
+    function messageBase(m) {
+      return m.keys().hasOnly(['channel', 'public', 'kind', 'authorKind', 'authorId', 'authorName', 'npcId', 'text', 'at', 'editedAt', 'deleted', 'pinned', 'sessionId', 'ledgerId', 'skill', 'imageId', 'contestId'])
+        && m.channel is string && m.channel.size() <= 100
+        && m.public == !m.channel.matches('whisper:.+')
+        && m.text is string && m.text.size() <= 2000
+        && m.at == request.time && m.editedAt == null && m.deleted == false && m.pinned == false
+        && (m.sessionId == null || (m.sessionId is string && sessionLive(m.sessionId)))
+        && (m.contestId == null || (m.contestId is string && exists(/databases/$(database)/documents/contests/$(m.contestId))));
     }
 
+    function playerMessageOk(id, m) {
+      return messageBase(m)
+        && m.authorKind == 'pc' && m.authorId == myPid() && m.authorName == get(playerPath(myPid())).data.name && m.npcId == null && m.imageId == null
+        && (channelPublic(m.channel) || whisperFor(m.channel))
+        && ((m.kind in ['say', 'act'] && m.text.size() >= 1 && m.ledgerId == null && m.skill == null)
+            || (m.kind == 'roll' && m.text.matches('[0-9]{1,2}d[0-9]{1,3}([+-][0-9]{1,3})?') && m.ledgerId == null && m.skill == null)
+            || (m.kind == 'skill' && skillMessageOk(id, m)));
+    }
+
+    // 특기 결제를 장면에 보이기: 이미 만들어진 내 특기 장부를 가리키고, 문서 id가 그 장부에 묶여 한 번만 보일 수 있다.
+    function skillMessageOk(id, m) {
+      let e = get(ledgerPath(m.ledgerId)).data;
+      return m.ledgerId is string && id == 'skill_' + m.ledgerId && m.channel.matches('place:[a-z0-9-]{1,40}') && m.text.size() >= 1
+        && e.type == 'skill' && e.playerId == myPid()
+        && m.skill == {'name': e.detail.skillName, 'base': e.detail.baseLevel, 'used': e.detail.usedLevel, 'cost': e.detail.cost};
+    }
+
+    function dealerMessageOk(m) {
+      return messageBase(m) && m.authorId == request.auth.uid && m.ledgerId == null && m.skill == null
+        && ((m.authorKind == 'gm' && m.authorName == '딜러' && m.npcId == null)
+            || (m.authorKind == 'narration' && m.authorName == '' && m.npcId == null)
+            || (m.authorKind == 'npc' && m.npcId is string && get(/databases/$(database)/documents/npcs/$(m.npcId)).data.name == m.authorName))
+        && ((m.kind in ['say', 'act', 'result'] && m.text.size() >= 1 && m.imageId == null)
+            || (m.kind == 'roll' && m.text.matches('[0-9]{1,2}d[0-9]{1,3}([+-][0-9]{1,3})?') && m.imageId == null)
+            || (m.kind == 'image' && m.imageId is string && exists(imagePath(m.imageId))));
+    }
+
+    // 주사위와 특기 결제는 고치거나 지울 수 없다.
     function editOk(m0, m1) {
-      return m0.kind != 'roll' && m0.deleted == false
+      return !(m0.kind in ['roll', 'skill']) && m0.deleted == false
         && onlyChanged(m0, m1, ['text', 'editedAt', 'deleted'])
         && m1.editedAt == request.time
         && ((m1.deleted == true && m1.text == '') || (m1.deleted == false && m1.text is string && m1.text.size() >= 1 && m1.text.size() <= 2000));
+    }
+
+    match /scenes/{place} {
+      allow read: if isAdmin() || cityPlayer();
+      allow write: if isAdmin();
+    }
+
+    match /sceneImages/{id} {
+      allow read: if signedIn();
+      allow create: if imageOk(id, request.resource.data)
+        && ((isAdmin() && request.resource.data.owner in ['place', 'npc', 'cut'])
+            || (cityPlayer() && request.resource.data.owner == 'player' && request.resource.data.ref == myPid()));
+      allow update: if (isAdmin() || (cityPlayer() && resource.data.owner == 'player' && resource.data.ref == myPid()))
+        && onlyChanged(resource.data, request.resource.data, ['name', 'filter', 'focus', 'sense', 'credit'])
+        && request.resource.data.filter in ['soft', 'strong', 'frame'] && request.resource.data.focus in ['top', 'center', 'bottom'];
+      allow delete: if isAdmin() || (cityPlayer() && resource.data.owner == 'player' && resource.data.ref == myPid());
+    }
+
+    function imageOk(id, i) {
+      return i.keys().hasOnly(['owner', 'ref', 'path', 'url', 'name', 'filter', 'focus', 'sense', 'credit', 'createdAt', 'createdBy'])
+        && i.path == 'uploads/' + request.auth.uid + '/' + id + '.webp'
+        && i.url is string && i.url.size() <= 2000 && i.ref is string && i.ref.size() <= 60
+        && i.filter in ['soft', 'strong', 'frame'] && i.focus in ['top', 'center', 'bottom']
+        && i.name is string && i.name.size() <= 60 && i.sense is string && i.sense.size() <= 120 && i.credit is string && i.credit.size() <= 200
+        && i.createdAt == request.time && i.createdBy == request.auth.uid;
+    }
+
+    match /npcs/{id} {
+      allow read: if isAdmin() || cityPlayer();
+      allow write: if isAdmin();
+      match /secret/{name} { allow read, write: if isAdmin(); }
+    }
+
+    match /sessions/{id} {
+      allow read: if isAdmin() || cityPlayer();
+      allow write: if isAdmin();
+    }
+
+    match /contests/{id} {
+      allow read: if isAdmin() || cityPlayer();
+      allow write: if isAdmin();
     }
 
     // ── 디스코드 알림 ──
