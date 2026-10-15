@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { allowDealer, playSomeGames, resetEmulators, seedCity, startRecorder, type SeededCity } from "./seed.ts";
+import { allowDealer, playSomeGames, resetEmulators, seedCity, signInWithGooglePopup, startRecorder, type SeededCity } from "./seed.ts";
 
 let city: SeededCity;
 let recorder: Awaited<ReturnType<typeof startRecorder>>;
@@ -86,12 +86,7 @@ test("exchange: board, chart, leveraged long with the loan slip, close", async (
 
 test("dealer: exchange tab shows the recorder, positions and news desk", async ({ page }) => {
   await page.goto("/dealer");
-  const popupPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: "Google로 로그인" }).click();
-  const popup = await popupPromise;
-  await popup.getByText("Add new account").click();
-  await popup.locator("#email-input").fill("gm-market@example.com");
-  await popup.getByRole("button", { name: /Sign in with Google/ }).click();
+  await signInWithGooglePopup(page, "gm-market@example.com");
   const uid = (await page.locator("code").filter({ hasText: /^[A-Za-z0-9]{20,}$/ }).first().textContent())?.trim() ?? "";
   await allowDealer(uid);
   await page.getByRole("button", { name: "거래소", exact: true }).click();
