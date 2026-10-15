@@ -131,13 +131,13 @@ describe("price engine", () => {
 describe("candles", () => {
   it("folds ticks into bars", () => {
     const hour = hourIndexAt(Date.UTC(2026, 9, 12, 3, 0));
-    let candle = foldCandle(undefined, 100);
-    candle = foldCandle(candle, 120); candle = foldCandle(candle, 90); candle = foldCandle(candle, 110);
-    expect(candle).toEqual([100, 120, 90, 110]);
+    let candle = foldCandle(undefined, 100, 5);
+    candle = foldCandle(candle, 120, 1); candle = foldCandle(candle, 90); candle = foldCandle(candle, 110, 4);
+    expect(candle).toEqual([100, 120, 90, 110, 10]);
     const doc = { hour, c: { m00: { FTN: candle }, m01: { FTN: [110, 130, 105, 125] }, m05: { FTN: [1, 2, 1, 2] } } } as never;
     const bars = barsFor([doc], "FTN", 5);
     expect(bars).toHaveLength(2);
-    expect(bars[0]).toMatchObject({ open: 1, high: 1.3, low: 0.9, close: 1.25 });
+    expect(bars[0]).toMatchObject({ open: 1, high: 1.3, low: 0.9, close: 1.25, volume: 10 });
     expect(minuteKey(Date.UTC(2026, 9, 12, 3, 7, 30))).toBe("m07");
   });
 });

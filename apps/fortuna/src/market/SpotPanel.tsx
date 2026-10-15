@@ -49,9 +49,9 @@ export function SpotPanel({ coin, market, price, stale, paused }: { coin: CoinId
     if (!holding) return;
     const result = await run(() => sellSpot(session, coin, sellUnits));
     if (!result) return;
-    const net = result.quote.payout - result.quote.costOut;
+    const paid = result.quote.payout - result.levy, net = paid - result.quote.costOut;
     cue(net >= 0 ? "win" : "lose");
-    toast(net >= 0 ? "success" : "info", `${coin} ${formatUnits(result.quote.units)}개를 팔았습니다: ${result.quote.payout.toLocaleString("ko-KR")}코인 (${net >= 0 ? "+" : ""}${net.toLocaleString("ko-KR")})`);
+    toast(net >= 0 ? "success" : "info", `${coin} ${formatUnits(result.quote.units)}개를 팔았습니다: ${paid.toLocaleString("ko-KR")}코인 (${net >= 0 ? "+" : ""}${net.toLocaleString("ko-KR")})${result.levy ? ` · 환전가 특별 징수 ${result.levy.toLocaleString("ko-KR")}코인` : ""}`);
   }
 
   return (

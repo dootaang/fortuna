@@ -6,12 +6,17 @@ import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
 import { wait } from "../fx/settings.ts";
 import { Coins, Frame, Modal, Notice, cx, formatDate, useAction } from "../ui/kit.tsx";
-import { ChartBoundary, PriceChart, type ChartFlag, type ChartLine } from "./PriceChart.tsx";
+import { ChartBoundary, INDICATORS, PriceChart, type ChartFlag, type ChartLine, type Indicator } from "./PriceChart.tsx";
 import { PositionCard } from "./Positions.tsx";
 import { SpotPanel } from "./SpotPanel.tsx";
-import { CoinBadge, FlapText, changeText, priceText } from "./pieces.tsx";
+import { CoinBadge, FlapText, LiquidationMap, LongShortBar, changeText, priceText } from "./pieces.tsx";
 import { directionOf, openingPrice, useCountdown, useFeed, useMarketConfig, useMyPositions, useTape } from "./useMarket.ts";
 import "./market.css";
+
+const INDICATOR_KEY = "fortuna:market:indicators";
+function readIndicators(): Indicator[] {
+  try { return (window.localStorage.getItem(INDICATOR_KEY) ?? "vol").split(",").filter((id): id is Indicator => INDICATORS.some((entry) => entry.id === id)); } catch { return ["vol"]; }
+}
 
 const FRAMES = [{ minutes: 1, label: "1분" }, { minutes: 5, label: "5분" }, { minutes: 15, label: "15분" }, { minutes: 60, label: "1시간" }] as const;
 
@@ -36,6 +41,15 @@ function CoinView({ coin }: { coin: CoinId }) {
   const positions = useMyPositions().filter((row) => row.data.coin === coin);
   const feed = useFeed(40, coin);
   const direction = directionOf(tick, coin);
+  const [indicators, setIndicators] = useState<Indicator[]>(readIndicators);
+  const [lastChip, setLastChip] = useState<Indicator | null>(null);
+  function toggle(id: Indicator) {
+    const next = indicators.includes(id) ? indicators.filter((entry) => entry !== id) : [...indicators, id];
+    setLastChip(next.includes(id) ? id : null);
+    setIndicators(next);
+    try { window.localStorage.setItem(INDICATOR_KEY, next.join(",")); } catch { /* not remembered */ }
+  }
+  const fx = tick?.fx;
 
   const lines: ChartLine[] = positions.filter((row) => row.data.status === "open").flatMap((row) => [
     { price: row.data.entry, color: "#e6c564", title: `${row.data.side === "long" ? "롱" : "숏"} 진입` },
@@ -66,9 +80,30 @@ function CoinView({ coin }: { coin: CoinId }) {
           ))}
         </div>
         <ChartBoundary resetKey={`${coin}:${minutes}`}>
-          <PriceChart hours={tape.hours} coin={coin} minutes={minutes} lines={lines} flags={flags} accent={def.accent} />
+          <PriceChart hours={tape.hours} coin={coin} minutes={minutes} lines={lines} flags={flags} accent={def.accent} indicators={indicators} />
         </ChartBoundary>
+        <div className="mt-2 flex flex-wrap gap-1" aria-label="보조지표">
+          {INDICATORS.map((entry) => (
+            <button key={entry.id} type="button" title={entry.hint} aria-pressed={indicators.includes(entry.id)} onClick={() => toggle(entry.id)}
+              className={cx("btn btn-sm", indicators.includes(entry.id) ? "btn-gold" : "btn-dark")}>{entry.label}</button>
+          ))}
+        </div>
+        {lastChip && <p className="mt-1 px-1 text-[0.7rem] leading-snug text-mist">{INDICATORS.find((entry) => entry.id === lastChip)!.label}: {INDICATORS.find((entry) => entry.id === lastChip)!.hint}</p>}
       </Frame>
+
+      {fx && (
+        <Frame className="mb-4">
+          <div className="mb-3">
+            <div className="mb-1 flex justify-between text-xs">
+              <span className="text-[#a9ecc9]">롱 {fx.ls[coin][0].toLocaleString("ko-KR")}</span>
+              <span className="text-mist">롱/숏 (주민 군중 + 플레이어)</span>
+              <span className="text-[#f2b3aa]">숏 {fx.ls[coin][1].toLocaleString("ko-KR")}</span>
+            </div>
+            <LongShortBar ls={fx.ls[coin]} />
+          </div>
+          <LiquidationMap lm={fx.lm[coin]} price={priceText(price)} />
+        </Frame>
+      )}
 
       {positions.length > 0 && (
         <section className="mb-4 space-y-3" aria-label="이 종목의 내 포지션">

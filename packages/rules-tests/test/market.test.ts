@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getAuth } from "firebase/auth";
 import { deleteField, doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
-import { DEFAULT_MARKET, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, type CoinId } from "@fortuna/core";
+import { DEFAULT_MARKET, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, weekIndexAt, type CoinId } from "@fortuna/core";
 import {
   announceBossFight, arrive, buySpot, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
   type PlayerSession, type Session,
@@ -64,6 +64,20 @@ describe("price recorder", () => {
     const stranger = await anonymousSession();
     await denied(setDoc(doc(stranger.db, "market", `h${hour + 5}`), { last: { seq: 1 } }));
     await denied(updateDoc(refs.wallet(oracle.db, player.pid), { balance: 1_000_000 }));
+  });
+
+  it("publishes the crowd, long/short, the liquidation map, fear & greed and volume (거래소 2부)", async () => {
+    const { quote } = await openPosition(player, { coin: "LNH", side: "short", leverage: 3, margin: 300 });
+    await tick();
+    const hourDoc = (await rootData(`market/h${Math.floor(clockMs / 3_600_000)}`))!;
+    const fx = hourDoc.last.fx;
+    expect(fx.fg).toBeGreaterThanOrEqual(0);
+    expect(fx.fg).toBeLessThanOrEqual(100);
+    expect(fx.ls.LNH[1]).toBeGreaterThanOrEqual(Math.floor(quote.notional / 100) * 100);
+    expect(fx.lm.LNH).toHaveLength(10);
+    expect(hourDoc.last.st.coins.LNH.npc.oi).toBeGreaterThan(0);
+    const candles = Object.values(hourDoc.c as Record<string, Record<string, number[]>>);
+    expect(candles.some((candle) => (candle.LNH![4] ?? 0) >= quote.notional)).toBe(true);
   });
 
   it("publishes dealer news and its whisper, which players cannot read early", async () => {
@@ -262,3 +276,68 @@ describe("spot", () => {
     await buySpot(player, "LNH", 100);
   });
 });
+
+describe("weekly profit cap (환전가 특별 징수)", () => {
+  /** Double a coin's newest price (rules off) so the next sale is a sure profit. */
+  async function pump(coin: CoinId, factor = 2) {
+    const path = `market/h${Math.floor(clockMs / 3_600_000)}`;
+    const price = (await rootData(path))!.last.p[coin] as number;
+    await asRoot((root) => root.doc(path).update({ [`last.p.${coin}`]: price * factor }));
+  }
+
+  it("keeps the week's profit above the cap, offsets nothing it should not, and starts over each week", async () => {
+    await saveMarket(admin, { ...DEFAULT_MARKET, weeklyProfitCap: 50 });
+    const bought = await buySpot(player, "LNH", 300);
+    await pump("LNH");
+    const half = Math.floor(bought.quote.units / 2);
+    const vault0 = (await rootData("vault/main"))!.amount;
+    const sold = await sellSpot(player, "LNH", half);
+    const profit = sold.quote.payout - sold.quote.costOut;
+    expect(profit).toBeGreaterThan(50);
+    expect(sold.levy).toBe(profit - 50);
+    const week = weekIndexAt(Date.now());
+    expect((await rootData(`wallets/${player.pid}`))!.marketWeek).toEqual({ week, net: 50 });
+    const entry = (await rootData(`ledger/${sold.ledgerId}`))!;
+    expect(entry.delta).toBe(sold.quote.payout - sold.levy);
+    expect(entry.detail.levy).toBe(sold.levy);
+    expect((await rootData("vault/main"))!.amount).toBe(vault0 - entry.delta);
+
+    // A sale that skips the levy is refused.
+    await denied(runTransaction(player.db, async (tx) => {
+      const wallet = await readWallet(tx, player), { hour, tick: last } = await readLatestTick(tx, player.db, Date.now());
+      const held = (await tx.get(refs.holding(player.db, player.pid, "LNH"))).data()!;
+      const units = Math.floor(held.units / 2), quote = quoteSell(DEFAULT_MARKET, units, last.p.LNH, held);
+      const id = writeEntry(tx, player, player.pid, wallet, {
+        type: "spotSell", actor: "player", delta: quote.payout, vaultDelta: -quote.payout,
+        detail: { coin: "LNH", units, price: quote.price, gross: quote.gross, fee: quote.fee, payout: quote.payout, costOut: quote.costOut, levy: 0, hour, seq: last.seq },
+        wallet: { marketWeek: { week, net: 50 + quote.payout - quote.costOut } },
+      });
+      tx.set(refs.holding(player.db, player.pid, "LNH"), { playerId: player.pid, coin: "LNH", units: held.units - units, cost: held.cost - quote.costOut, lastLedger: id });
+      expect(quote.payout - quote.costOut).toBeGreaterThan(0);
+    }));
+
+    // Last week's profit does not count: a new week starts from zero.
+    await asRoot((root) => root.doc(`wallets/${player.pid}`).update({ marketWeek: { week: week - 1, net: 9_999 } }));
+    const rest = await sellSpot(player, "LNH", bought.quote.units - half);
+    expect(rest.levy).toBe(Math.max(0, rest.quote.payout - rest.quote.costOut - 50));
+
+    // A futures loss in the same week makes room again.
+    await saveMarket(admin, { ...DEFAULT_MARKET, weeklyProfitCap: 5_000 });
+    const { positionId, quote } = await openPosition(player, { coin: "FTN", side: "long", leverage: 5, margin: 100 });
+    await tick();
+    await updateDoc(refs.position(admin.db, positionId), { status: "void" });
+    const refund = await closePosition(player, positionId);
+    expect(refund.levy).toBe(0);
+    expect((await rootData(`wallets/${player.pid}`))!.marketWeek).toEqual({ week, net: 50 - quote.fee });
+  });
+
+  it("is off at 0, and a wallet from before the cap counts as zero this week", async () => {
+    await saveMarket(admin, { ...DEFAULT_MARKET, weeklyProfitCap: 0 });
+    const bought = await buySpot(player, "ORB", 200);
+    await pump("ORB", 3);
+    const sold = await sellSpot(player, "ORB", bought.quote.units);
+    expect(sold.levy).toBe(0);
+    expect((await rootData(`wallets/${player.pid}`))!.marketWeek.net).toBe(sold.quote.payout - sold.quote.costOut);
+  });
+});
+

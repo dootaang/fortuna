@@ -1,9 +1,9 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  CandlestickSeries, ColorType, CrosshairMode, LineStyle, createChart, createSeriesMarkers,
-  type CandlestickData, type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
+  CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers,
+  type CandlestickData, type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type SeriesType, type Time, type UTCTimestamp,
 } from "lightweight-charts";
-import { barsFor, formatPrice, type CoinId, type HourDoc } from "@fortuna/core";
+import { barsFor, bollinger, formatPrice, rsi, sma, type CoinId, type HourDoc } from "@fortuna/core";
 import type { Timestamp } from "firebase/firestore";
 
 /** The chart library shows UTC; shifting by +9h makes its axis read in KST. */
@@ -14,7 +14,16 @@ export interface ChartFlag { atMs: number; tone: "up" | "down" | "warn" | "info"
 
 const TONE_COLOR = { up: "#4fc08d", down: "#e06a5c", warn: "#e6c564", info: "#a9bfb4" } as const;
 
-export function PriceChart({ hours, coin, minutes, lines, flags, accent }: {
+/** 보조지표 칩 (docs/SPEC-MARKET-DEPTH.md 2-4). */
+export type Indicator = "ma" | "bb" | "vol" | "rsi";
+export const INDICATORS: { id: Indicator; label: string; hint: string }[] = [
+  { id: "ma", label: "이동평균", hint: "20·60봉 평균. 짧은 선이 긴 선을 뚫고 오르면 흐름이 위로 바뀌는 신호로 본다." },
+  { id: "bb", label: "볼린저", hint: "평균 ±2표준편차. 띠가 좁아지면 큰 움직임이 가깝고, 띠 밖은 많이 달린 자리다." },
+  { id: "vol", label: "거래량", hint: "주민 군중과 플레이어의 거래량. 거래량을 동반한 돌파가 믿을 만하다." },
+  { id: "rsi", label: "RSI", hint: "70 이상은 최근에 많이 올랐다, 30 이하는 많이 내렸다. 흐름이 안 바뀌면 쉬어 가기 쉽다." },
+];
+
+export function PriceChart({ hours, coin, minutes, lines, flags, accent, indicators = [] }: {
   hours: readonly HourDoc<Timestamp>[];
   coin: CoinId;
   minutes: number;
@@ -22,6 +31,7 @@ export function PriceChart({ hours, coin, minutes, lines, flags, accent }: {
   lines: ChartLine[];
   flags: ChartFlag[];
   accent: string;
+  indicators?: readonly Indicator[];
 }) {
   const box = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
@@ -32,6 +42,7 @@ export function PriceChart({ hours, coin, minutes, lines, flags, accent }: {
   const lastTime = useRef<number>(0);
   const times = useRef<number[]>([]);
   const [revision, setRevision] = useState(0);
+  const extras = useRef<Map<string, ISeriesApi<SeriesType>>>(new Map());
 
   useEffect(() => {
     if (!box.current) return undefined;
@@ -50,7 +61,7 @@ export function PriceChart({ hours, coin, minutes, lines, flags, accent }: {
     });
     markers.current = createSeriesMarkers(series.current, []);
     chart.current = created;
-    return () => { created.remove(); chart.current = null; series.current = null; markers.current = null; priceLines.current = []; shown.current = ""; lastTime.current = 0; };
+    return () => { created.remove(); chart.current = null; series.current = null; markers.current = null; priceLines.current = []; shown.current = ""; lastTime.current = 0; extras.current.clear(); };
   }, []);
 
   // Candles: replace on coin/timeframe change; on a new tick only touch bars from the last shown one on,
@@ -76,6 +87,52 @@ export function PriceChart({ hours, coin, minutes, lines, flags, accent }: {
     setRevision((value) => value + 1);
   }, [hours, coin, minutes]);
 
+  // Indicators: recomputed from the loaded bars and redrawn whole (a few hundred points at most).
+  useEffect(() => {
+    const owner = chart.current;
+    if (!owner) return;
+    const bars = barsFor(hours, coin, minutes), closes = bars.map((bar) => bar.close), time = (index: number) => (bars[index]!.time + KST_SECONDS) as UTCTimestamp;
+    const line = (values: (number | null)[]) => values.flatMap((value, index) => (value === null ? [] : [{ time: time(index), value }]));
+    const wanted = new Map<string, () => void>();
+    const ensure = (key: string, make: () => ISeriesApi<SeriesType>, fill: (target: ISeriesApi<SeriesType>) => void) => {
+      wanted.set(key, () => {
+        let target = extras.current.get(key);
+        if (!target) { target = make(); extras.current.set(key, target); }
+        fill(target);
+      });
+    };
+    const thin = { lineWidth: 1 as const, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false };
+    if (indicators.includes("ma")) {
+      ensure("ma20", () => owner.addSeries(LineSeries, { ...thin, color: "#e6c564" }), (target) => target.setData(line(sma(closes, 20))));
+      ensure("ma60", () => owner.addSeries(LineSeries, { ...thin, color: "#7fb7d9" }), (target) => target.setData(line(sma(closes, 60))));
+    }
+    if (indicators.includes("bb")) {
+      const bands = bollinger(closes, 20, 2);
+      ensure("bbUp", () => owner.addSeries(LineSeries, { ...thin, color: "rgba(211,95,209,0.7)", lineStyle: LineStyle.Dotted }), (target) => target.setData(line(bands.map((band) => band.upper))));
+      ensure("bbLow", () => owner.addSeries(LineSeries, { ...thin, color: "rgba(211,95,209,0.7)", lineStyle: LineStyle.Dotted }), (target) => target.setData(line(bands.map((band) => band.lower))));
+    }
+    if (indicators.includes("vol")) {
+      ensure("vol", () => {
+        const made = owner.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
+        owner.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+        return made as unknown as ISeriesApi<SeriesType>;
+      }, (target) => target.setData(bars.map((bar, index) => ({ time: time(index), value: bar.volume, color: bar.close >= bar.open ? "rgba(79,192,141,0.35)" : "rgba(196,71,58,0.35)" }))));
+    }
+    if (indicators.includes("rsi")) {
+      ensure("rsi", () => {
+        const made = owner.addSeries(LineSeries, { ...thin, color: "#e6c564", lastValueVisible: true }, 1);
+        made.createPriceLine({ price: 70, color: "rgba(224,106,92,0.6)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
+        made.createPriceLine({ price: 30, color: "rgba(79,192,141,0.6)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
+        owner.panes()[1]?.setHeight(80);
+        return made as unknown as ISeriesApi<SeriesType>;
+      }, (target) => target.setData(line(rsi(closes, 14))));
+    }
+    try {
+      for (const [key, target] of extras.current) if (!wanted.has(key)) { owner.removeSeries(target); extras.current.delete(key); }
+      for (const draw of wanted.values()) draw();
+    } catch { /* an indicator that cannot be drawn is left out */ }
+  }, [hours, coin, minutes, indicators.join(",")]);
+
   useEffect(() => {
     const target = series.current;
     if (!target) return;
@@ -96,7 +153,7 @@ export function PriceChart({ hours, coin, minutes, lines, flags, accent }: {
     try { markers.current?.setMarkers(items); } catch { /* a flag the chart cannot place is not worth a crash */ }
   }, [JSON.stringify(flags), minutes, revision]);
 
-  return <div ref={box} className="h-64 w-full sm:h-80" role="img" aria-label={`${coin} 가격 차트, ${minutes}분 봉. 최근가 ${formatPrice(hours.at(-1)?.last.p[coin] ?? 0)}`} />;
+  return <div ref={box} className={indicators.includes("rsi") ? "h-80 w-full sm:h-96" : "h-64 w-full sm:h-80"} role="img" aria-label={`${coin} 가격 차트, ${minutes}분 봉. 최근가 ${formatPrice(hours.at(-1)?.last.p[coin] ?? 0)}`} />;
 }
 
 /** A chart failure shows a note instead of taking the whole page down. */

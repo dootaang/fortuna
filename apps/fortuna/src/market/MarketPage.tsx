@@ -1,13 +1,13 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router";
-import { COINS, COIN_IDS, entryPaused, periodWords, type CoinId } from "@fortuna/core";
+import { COINS, COIN_IDS, entryPaused, periodWords, weekIndexAt, type CoinId } from "@fortuna/core";
 import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
 import { Frame, Notice, PageTitle, cx, formatDate } from "../ui/kit.tsx";
 import { VenueTabs } from "../pages/VenueList.tsx";
 import { PositionCard } from "./Positions.tsx";
 import { HoldingsList } from "./HoldingsList.tsx";
-import { CoinBadge, FlapText, Sparkline, changeText, priceText } from "./pieces.tsx";
+import { CoinBadge, FearGreedGauge, FlapText, LongShortBar, Sparkline, changeText, priceText } from "./pieces.tsx";
 import { directionOf, openingPrice, useCountdown, useFeed, useMarketConfig, useMyPositions, useTape } from "./useMarket.ts";
 import "./market.css";
 
@@ -52,7 +52,10 @@ export default function MarketPage() {
         <>
           <section className="departure-board mb-4 p-3" aria-label="시세판">
             <div className="mb-2 flex items-center justify-between gap-2 px-1">
-              <p className="deco-caps">Departures · 시세</p>
+              <div className="flex items-center gap-3">
+                <p className="deco-caps">Departures · 시세</p>
+                {tick?.fx && <FearGreedGauge value={tick.fx.fg} compact />}
+              </div>
               <div className="flex items-center gap-2 text-xs text-mist">
                 {stale ? <span className="text-[#f2b3aa]">시세 기록원 대기 중</span> : left > 0 ? <span>다음 시세 <span className="num text-gold-200">{left}</span>초</span> : <span className="text-gold-200">시세 갱신 중…</span>}
                 <span className="station-clock" style={{ ["--turn" as string]: String(1 - left / market.tickSeconds) }} aria-hidden="true" />
@@ -71,6 +74,7 @@ export default function MarketPage() {
             </p>
             <p className="mt-1 text-xs text-mist">현물은 그냥 사고팔기(이자·강제 청산 없음). 선물은 수수료 진입·청산 각 {market.feeBps / 100}% · 빌린 돈 이자 시간당 {market.interestBps / 100}% · 손실이 증거금의 {market.liquidationBps / 100}%에 닿으면 강제 청산 · 수익이 증거금의 {market.capMultiple}배면 자동 익절</p>
             {!economy.gambling.houseOpen && <p className="mt-1 text-xs text-gold-200">하우스가 열리면 배율 한도가 올라갑니다.</p>}
+            {market.weeklyProfitCap > 0 && <WeekNet net={wallet.marketWeek?.week === weekIndexAt(now()) ? wallet.marketWeek.net : 0} cap={market.weeklyProfitCap} />}
           </Frame>
 
           {positions.length > 0 && (
@@ -98,6 +102,16 @@ export default function MarketPage() {
         </>
       )}
     </div>
+  );
+}
+
+/** 이번 주 거래소 순이익과 특별 징수 한도. */
+export function WeekNet({ net, cap }: { net: number; cap: number }) {
+  return (
+    <p className="mt-1 text-xs text-mist">
+      이번 주 거래소 순이익 <b className={cx("num", net > 0 ? "text-[#a9ecc9]" : net < 0 ? "text-[#f2b3aa]" : "text-ivory")}>{net > 0 ? "+" : ""}{net.toLocaleString("ko-KR")}</b> / {cap.toLocaleString("ko-KR")}코인
+      <span className="ml-1">· 넘는 몫은 환전가 특별 징수로 지배인 금고에 남습니다 (월요일 0시에 새로 셈).</span>
+    </p>
   );
 }
 
@@ -130,6 +144,7 @@ function BoardRow({ coin, tape, halted, paused }: { coin: CoinId; tape: ReturnTy
           <p className={cx("num text-[0.7rem]", `tone-${change.tone}`)}>{change.text}</p>
         </div>
       </Link>
+      {tick?.fx && <div className="px-1 pb-1"><LongShortBar ls={tick.fx.ls[coin]} thin /></div>}
     </li>
   );
 }

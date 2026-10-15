@@ -1,6 +1,6 @@
 import { Timestamp, addDoc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Firestore, type Transaction } from "firebase/firestore";
 import {
-  COINS, DEFAULT_MARKET, HOUR_MS, KST_OFFSET_MS, entryPaused, hourIndexAt, leverageChoices, normalizeMarket, periodWords, quoteBuy, quoteClose, quoteOpen, quoteSell,
+  COINS, DEFAULT_MARKET, HOUR_MS, KST_OFFSET_MS, entryPaused, weekIndexAt, weeklyLevy, hourIndexAt, leverageChoices, normalizeMarket, periodWords, quoteBuy, quoteClose, quoteOpen, quoteSell,
   type BuyQuote, type CloseKind, type SellQuote, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
 } from "@fortuna/core";
 import { FortunaError, writeEntry, type PlayerSession, type Session } from "./ledger-write.ts";
@@ -71,7 +71,7 @@ export async function openPosition(session: PlayerSession, request: OpenRequest)
 
 const KIND_BY_STATUS: Partial<Record<PositionDoc["status"], CloseKind>> = { open: "close", capped: "cap", liquidated: "liquidated", void: "refund" };
 
-export interface CloseResult { ledgerId: string; positionId: string; quote: CloseQuote; margin: number; eventId: string | null; }
+export interface CloseResult { ledgerId: string; positionId: string; quote: CloseQuote; margin: number; eventId: string | null; levy: number; }
 
 /**
  * Settle a position: close an open one at the newest price, or book what the price recorder
@@ -96,22 +96,24 @@ export async function closePosition(session: PlayerSession, positionId: string, 
       hour = latest.hour; seq = latest.tick.seq; exit = latest.tick.p[position.coin]; closedAtMs = session.clock.now();
     }
     const quote = quoteClose(market, terms, kind, exit, closedAtMs);
-    const before = counters(wallet), net = quote.payout - position.margin;
+    const week = weeklyLevy(wallet.marketWeek, weekIndexAt(session.clock.now()), quote.payout - (position.margin + position.fee), market.weeklyProfitCap);
+    const paid = quote.payout - week.levy;
+    const before = counters(wallet), net = paid - position.margin;
     const notify = kind === "cap" || Math.abs(net) >= bigGamble || (kind === "liquidated" && position.margin * 2 >= bigGamble);
     const ledgerId = writeEntry(tx, session, session.pid, wallet, {
-      type: "marketClose", actor: "player", delta: quote.payout, vaultDelta: -quote.payout,
+      type: "marketClose", actor: "player", delta: paid, vaultDelta: -paid,
       detail: {
         positionId, coin: position.coin, side: position.side, leverage: position.leverage, margin: position.margin, kind,
-        exit: quote.exit, hour, seq, hours: quote.hours, pnl: quote.pnl, interest: quote.interest, fee: quote.fee, payout: quote.payout,
+        exit: quote.exit, hour, seq, hours: quote.hours, pnl: quote.pnl, interest: quote.interest, fee: quote.fee, payout: quote.payout, levy: week.levy,
       },
-      wallet: { market: { ...before, open: before.open - 1 } },
+      wallet: { market: { ...before, open: before.open - 1 }, marketWeek: week.after },
       ...(notify ? { event: { kind: net > 0 ? ("marketWin" as const) : ("marketLoss" as const) } } : {}),
     });
     tx.update(refs.position(db, positionId), {
       status: "closed", outcome: kind, payout: quote.payout, lastLedger: ledgerId,
       ...(kind === "close" ? { exit, exitSeq: seq, exitAt: serverTimestamp() } : {}),
     });
-    return { ledgerId, positionId, quote, margin: position.margin, eventId: notify ? ledgerId : null };
+    return { ledgerId, positionId, quote, margin: position.margin, eventId: notify ? ledgerId : null, levy: week.levy };
   });
 }
 
@@ -167,7 +169,7 @@ export async function buySpot(session: PlayerSession, coin: CoinId, amount: numb
 }
 
 /** Sell `units` (1/10,000 coin) of a holding at the newest price; selling works even while buying is paused. */
-export async function sellSpot(session: PlayerSession, coin: CoinId, units: number): Promise<{ ledgerId: string; quote: SellQuote }> {
+export async function sellSpot(session: PlayerSession, coin: CoinId, units: number): Promise<{ ledgerId: string; quote: SellQuote; levy: number }> {
   const { db } = session;
   return runTransaction(db, async (tx) => {
     const wallet = await readWallet(tx, session), market = await readMarket(tx, db);
@@ -177,12 +179,15 @@ export async function sellSpot(session: PlayerSession, coin: CoinId, units: numb
     if (!Number.isInteger(units) || units < 1 || units > held.units) throw new FortunaError("units", "팔 수량을 확인해 주세요.");
     requireFresh(tick, market, session.clock.now());
     const quote = quoteSell(market, units, tick.p[coin], held);
+    const week = weeklyLevy(wallet.marketWeek, weekIndexAt(session.clock.now()), quote.payout - quote.costOut, market.weeklyProfitCap);
+    const paid = quote.payout - week.levy;
     const ledgerId = writeEntry(tx, session, session.pid, wallet, {
-      type: "spotSell", actor: "player", delta: quote.payout, vaultDelta: -quote.payout,
-      detail: { coin, units, price: quote.price, gross: quote.gross, fee: quote.fee, payout: quote.payout, costOut: quote.costOut, hour, seq: tick.seq },
+      type: "spotSell", actor: "player", delta: paid, vaultDelta: -paid,
+      detail: { coin, units, price: quote.price, gross: quote.gross, fee: quote.fee, payout: quote.payout, costOut: quote.costOut, levy: week.levy, hour, seq: tick.seq },
+      wallet: { marketWeek: week.after },
     });
     tx.set(holdingRef, { playerId: session.pid, coin, units: held.units - units, cost: held.cost - quote.costOut, lastLedger: ledgerId });
-    return { ledgerId, quote };
+    return { ledgerId, quote, levy: week.levy };
   });
 }
 

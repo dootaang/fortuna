@@ -134,3 +134,28 @@ export function liveEquity(config: MarketConfig, position: PositionTerms, price:
   const equity = position.margin + pnl - interest;
   return { pnl, interest, equity, ratio: pnl / position.margin };
 }
+
+// ── 환전가 특별 징수 (docs/SPEC-MARKET-DEPTH.md 6-5) ──
+
+export interface MarketWeek { week: number; net: number; }
+
+export interface LevyQuote {
+  /** Profit of this settlement before the levy (negative for a loss). */
+  profit: number;
+  /** Coins kept by the house. */
+  levy: number;
+  /** The wallet's marketWeek afterwards. */
+  after: MarketWeek;
+}
+
+/**
+ * Futures: profit = payout − (margin + opening fee). Spot: payout − cost of the units sold.
+ * Losses in the same week offset gains; a new week starts from 0. Only the part of the week's net
+ * above `cap` is levied, never more than this settlement's own profit. firestore.rules repeats this.
+ */
+export function weeklyLevy(stored: MarketWeek | undefined, week: number, profit: number, cap: number): LevyQuote {
+  const net0 = stored && stored.week === week ? stored.net : 0;
+  const over = net0 + profit - cap, gain = Math.max(0, profit);
+  const levy = cap <= 0 || over <= 0 ? 0 : Math.min(over, gain);
+  return { profit, levy, after: { week, net: net0 + profit - levy } };
+}

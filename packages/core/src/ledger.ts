@@ -51,6 +51,8 @@ export interface Wallet<T = TimestampLike> {
   market?: MarketCounters;
   /** Spot buys in the current limit period. Missing on wallets created before spot trading. */
   spot?: { period: number; used: number };
+  /** 이번 주 거래소 순이익 (docs/SPEC-MARKET-DEPTH.md 6-5). Missing = 0 this week. */
+  marketWeek?: { week: number; net: number };
 }
 
 /** Trades opened in `period` (config/economy limitPeriod) and positions still unsettled. */

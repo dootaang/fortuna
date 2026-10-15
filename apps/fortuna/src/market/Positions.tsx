@@ -38,10 +38,10 @@ export function PositionCard({ row, tick, market, compact }: { row: Row<Position
     setClosing(false);
     if (!result) return;
     relay(notify.relayUrl, result.eventId);
-    const net = result.quote.payout - result.margin;
+    const paid = result.quote.payout - result.levy, net = paid - result.margin;
     if (net > 0) { cue(net >= result.margin ? "bigWin" : "win"); if (net >= result.margin) celebrate(2); }
     else { cue("lose"); flash("ruby"); }
-    toast(net >= 0 ? "success" : "info", `${position.coin} 정산: ${result.quote.payout.toLocaleString("ko-KR")}코인 (${net >= 0 ? "+" : ""}${net.toLocaleString("ko-KR")})`);
+    toast(net >= 0 ? "success" : "info", `${position.coin} 정산: ${paid.toLocaleString("ko-KR")}코인 (${net >= 0 ? "+" : ""}${net.toLocaleString("ko-KR")})${result.levy ? ` · 환전가 특별 징수 ${result.levy.toLocaleString("ko-KR")}코인` : ""}`);
   }
 
   return (

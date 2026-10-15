@@ -16,6 +16,8 @@ export * from "./pvp/old-maid.ts";
 export * from "./market/coins.ts";
 export * from "./market/config.ts";
 export * from "./market/position.ts";
+export * from "./market/crowd.ts";
+export * from "./market/indicators.ts";
 export * from "./market/feed.ts";
 export * from "./market/engine.ts";
 export * from "./market/tape.ts";

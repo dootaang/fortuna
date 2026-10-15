@@ -851,7 +851,7 @@ service cloud.firestore {
       let m = marketConfig();
       let c0 = marketCounters(before);
       let manual = d.kind == 'close';
-      return d.keys().hasOnly(['positionId', 'coin', 'side', 'leverage', 'margin', 'kind', 'exit', 'hour', 'seq', 'hours', 'pnl', 'interest', 'fee', 'payout'])
+      return d.keys().hasOnly(['positionId', 'coin', 'side', 'leverage', 'margin', 'kind', 'exit', 'hour', 'seq', 'hours', 'pnl', 'interest', 'fee', 'payout', 'levy'])
         && p0.playerId == e.playerId
         && d.coin == p0.coin && d.side == p0.side && d.leverage == p0.leverage && d.margin == p0.margin
         && ((manual && p0.status == 'open' && closeExitOk(d, p0, m) && closeMathOk(d, p0, m, request.time))
@@ -861,9 +861,25 @@ service cloud.firestore {
             || (d.kind == 'refund' && p0.status == 'void' && d.exit == p0.entry && d.hour == null && d.seq == null
                 && d.hours == 0 && d.pnl == 0 && d.interest == 0 && d.fee == 0 && d.payout == d.margin))
         && p1.status == 'closed' && p1.lastLedger == entryId
-        && e.delta == d.payout && e.debtDelta == 0 && e.vaultDelta == -d.payout
+        && weekOk(d, before, after, d.payout - (p0.margin + p0.fee), m)
+        && e.delta == d.payout - d.levy && e.debtDelta == 0 && e.vaultDelta == d.levy - d.payout
         && after.market == {'period': c0.period, 'used': c0.used, 'open': c0.open - 1}
-        && onlyChanged(before, after, ['balance', 'seq', 'market']);
+        && onlyChanged(before, after, ['balance', 'seq', 'market', 'marketWeek']);
+    }
+
+    // 환전가 특별 징수 (docs/SPEC-MARKET-DEPTH.md 6-5): 이번 주(월요일 0시 KST부터) 거래소 순이익이 상한을 넘는 몫은
+    // 지급하지 않고 금고에 남긴다. 같은 주 손실은 이익을 깎고, 주가 바뀌면 0부터. 계산식은 core weeklyLevy와 같다.
+    function weekNet0(before) {
+      let w0 = before.get('marketWeek', {'week': -1, 'net': 0});
+      return w0.week == curWeek() ? w0.net : 0;
+    }
+    function weekOk(d, before, after, profit, m) {
+      let net0 = weekNet0(before);
+      let cap = m.get('weeklyProfitCap', 5000);
+      let over = net0 + profit - cap;
+      let gain = profit > 0 ? profit : 0;
+      return d.levy == (cap <= 0 || over <= 0 ? 0 : (over < gain ? over : gain))
+        && after.marketWeek == {'week': curWeek(), 'net': net0 + profit - d.levy};
     }
 
     function closeExitOk(d, p0, m) {
@@ -948,15 +964,16 @@ service cloud.firestore {
       let m = marketConfig();
       let tick = get(marketPath(d.hour)).data.last;
       let h0 = get(holdingPath(e.playerId, d.coin)).data;
-      return d.keys().hasOnly(['coin', 'units', 'price', 'gross', 'fee', 'payout', 'costOut', 'hour', 'seq'])
+      return d.keys().hasOnly(['coin', 'units', 'price', 'gross', 'fee', 'payout', 'costOut', 'levy', 'hour', 'seq'])
         && tickOk(d.hour, d.seq, tick, m) && d.price == tick.p[d.coin]
         && d.units is int && d.units >= 1 && d.units <= h0.units
         && isFloor(d.gross, d.units * d.price, 1000000)
         && feeOk(d.fee, d.gross, m)
         && d.payout == (d.gross - d.fee > 0 ? d.gross - d.fee : 0)
         && (d.units == h0.units ? d.costOut == h0.cost : isFloor(d.costOut, h0.cost * d.units, h0.units))
-        && e.delta == d.payout && e.debtDelta == 0 && e.vaultDelta == -d.payout
-        && onlyChanged(before, after, ['balance', 'seq'])
+        && weekOk(d, before, after, d.payout - d.costOut, m)
+        && e.delta == d.payout - d.levy && e.debtDelta == 0 && e.vaultDelta == d.levy - d.payout
+        && onlyChanged(before, after, ['balance', 'seq', 'marketWeek'])
         && getAfter(holdingPath(e.playerId, d.coin)).data.lastLedger == entryId;
     }
 

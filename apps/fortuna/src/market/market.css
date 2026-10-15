@@ -91,4 +91,8 @@
   @media (prefers-reduced-motion: reduce) {
     .flap-turn, .tick-up, .tick-down, .danger-pulse, .burning::after, .stamp-in { animation: none; }
   }
+
+  .ls-bar { position: relative; height: 6px; border-radius: 2px; overflow: hidden; background: rgba(196, 71, 58, 0.75); }
+  .ls-bar-thin { height: 3px; opacity: 0.85; }
+  .ls-long { position: absolute; inset: 0 auto 0 0; background: rgba(79, 192, 141, 0.85); }
 }

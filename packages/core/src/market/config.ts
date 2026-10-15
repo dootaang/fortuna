@@ -48,6 +48,10 @@ export interface MarketConfig {
    * `paused` — new entries and buys stop after a 간부전 예고 until the district's liberation reaches the price.
    */
   coins: Record<CoinId, { enabled: boolean; volMult: number; paused: boolean }>;
+  /** 환전가 특별 징수: a player's weekly exchange net profit above this is kept by the house (0 = off). */
+  weeklyProfitCap: number;
+  /** NPC 거래자 (docs/SPEC-MARKET-DEPTH.md 2-0): on/off and size multiplier. No coins move. */
+  npc: { enabled: boolean; scale: number };
 }
 
 export const DEFAULT_MARKET: MarketConfig = {
@@ -69,6 +73,8 @@ export const DEFAULT_MARKET: MarketConfig = {
   staleSeconds: 90,
   tickSeconds: 15,
   coins: Object.fromEntries(COIN_IDS.map((id) => [id, { enabled: true, volMult: 1, paused: false }])) as MarketConfig["coins"],
+  weeklyProfitCap: 5_000,
+  npc: { enabled: true, scale: 1 },
 };
 
 const int = (value: unknown, fallback: number, min = 0, max = 1e9) => Math.round(numberOr(value, fallback, min, max));
@@ -78,6 +84,7 @@ export function normalizeMarket(raw: unknown): MarketConfig {
   const source = isRecord(raw) ? raw : {}, d = DEFAULT_MARKET;
   const leverage = isRecord(source.leverage) ? source.leverage : {};
   const coins = isRecord(source.coins) ? source.coins : {};
+  const npc = isRecord(source.npc) ? source.npc : {};
   const steps = Array.isArray(leverage.steps) && leverage.steps.length > 0 && leverage.steps.every((step) => Number.isSafeInteger(step) && (step as number) >= 1 && (step as number) <= 100)
     ? [...new Set(leverage.steps as number[])].sort((a, b) => a - b) : [...d.leverage.steps];
   return {
@@ -106,6 +113,8 @@ export function normalizeMarket(raw: unknown): MarketConfig {
       const stored = isRecord(coins[id]) ? coins[id] : {};
       return [id, { enabled: bool(stored.enabled, true), volMult: numberOr(stored.volMult, 1, 0, 5), paused: bool(stored.paused, false) }];
     })) as MarketConfig["coins"],
+    weeklyProfitCap: int(source.weeklyProfitCap, d.weeklyProfitCap, 0, 1e9),
+    npc: { enabled: bool(npc.enabled, d.npc.enabled), scale: numberOr(npc.scale, d.npc.scale, 0, 5) },
   };
 }
 

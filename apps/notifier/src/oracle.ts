@@ -1,7 +1,7 @@
 import {
-  COIN_IDS, debtFactor, foldCandle, heatFactor, hourDocId, hourIndexAt, initialMarketState, isCoinId, marketSeed, minuteKey, normalizeMarket, normalizeNotify,
+  COIN_IDS, buildStructure, debtFactor, foldCandle, heatFactor, hourDocId, hourIndexAt, initialMarketState, isCoinId, marketSeed, minuteKey, normalizeMarket, normalizeNotify,
   seedKeys, stateFromTick, stepMarket, tickFromState, tickSeq, triggerAt,
-  type Candle, type CoinId, type FeedItem, type MarketConfig, type MarketState, type NewsShock, type NewsSize, type TickDoc, type WorldInput,
+  type Candle, type CoinId, type OpenLot, type FeedItem, type MarketConfig, type MarketState, type NewsShock, type NewsSize, type TickDoc, type WorldInput,
 } from "@fortuna/core";
 import { CommitConflict, FirestoreRest, Stamp, encode, encodeFields, type Doc, type Write } from "./firestore-rest.ts";
 
@@ -112,10 +112,25 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     }
   }
 
+  // 거래소 2부: players' share of the structure and volume (new positions since the last tick), liquidations into the hour's tally.
+  const lots: OpenLot[] = [], volume = { ...stepped.flow };
+  const ended = new Set(ends.map(({ doc }) => doc.id));
+  for (const doc of open) {
+    const coin = doc.data.coin, side = doc.data.side, notional = Number(doc.data.margin) * Number(doc.data.leverage);
+    if (!isCoinId(coin) || (side !== "long" && side !== "short") || !Number.isFinite(notional)) continue;
+    if (Number(doc.data.entrySeq) === base.seq) volume[coin] += notional;
+    if (ended.has(doc.id)) {
+      const tick = state.coins[coin];
+      if (ends.find((end) => end.doc.id === doc.id)?.status === "liquidated") state.coins[coin] = { ...tick, lq: (tick.lq ?? 0) + notional };
+      continue;
+    }
+    lots.push({ coin, side, notional, liq: Number(doc.data.liq) });
+  }
+
   const hour = hourIndexAt(atMs), minute = minuteKey(atMs);
   const previous = recorder.hour === hour && recorder.minute === minute ? recorder.candle : null;
-  const candle = Object.fromEntries(COIN_IDS.map((id) => [id, foldCandle(previous?.[id], state.coins[id].p)])) as Record<CoinId, Candle>;
-  const last = tickFromState(state, new Stamp(atMs));
+  const candle = Object.fromEntries(COIN_IDS.map((id) => [id, foldCandle(previous?.[id], state.coins[id].p, Math.round(volume[id]))])) as Record<CoinId, Candle>;
+  const last = { ...tickFromState(state, new Stamp(atMs)), fx: buildStructure(state, lots, (coin) => config.coins[coin]?.volMult ?? 1) };
   const sameDoc = recorder.hour === hour && recorder.hourUpdateTime !== null;
   const writes: Write[] = [
     sameDoc

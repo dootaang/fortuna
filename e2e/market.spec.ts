@@ -28,12 +28,23 @@ test("exchange: board, chart, leveraged long with the loan slip, close", async (
   await expect(page.getByRole("heading", { name: "환전가 거래소" })).toBeVisible();
   await expect(page.getByRole("link", { name: /포르투나 코인/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /무월 코인/ })).toBeVisible();
+  // 거래소 2부: fear & greed on the board, long/short under each row.
+  await expect(page.getByRole("meter", { name: /공포·탐욕 지수/ })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("img", { name: /롱 \d+% · 숏/ }).first()).toBeVisible();
+  await expect(page.getByText(/이번 주 거래소 순이익/)).toBeVisible();
   await page.waitForTimeout(2_500);
   await page.screenshot({ path: "test-results/shots/30-market-board.png", fullPage: true, animations: "disabled" });
 
   await page.getByRole("link", { name: /포르투나 코인/ }).click();
   await expect(page.getByRole("heading", { name: "포르투나 코인" })).toBeVisible();
   await expect(page.getByRole("img", { name: /FTN 가격 차트/ })).toBeVisible();
+
+  // Indicators and the market structure.
+  for (const chip of ["이동평균", "볼린저", "RSI"]) await page.getByRole("button", { name: chip, exact: true }).click();
+  await expect(page.getByRole("button", { name: "거래량", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("청산 지도")).toContainText("현재가");
+  await page.waitForTimeout(1_500);
+  await page.screenshot({ path: "test-results/shots/36-market-indicators.png", fullPage: true, animations: "disabled" });
 
   // Every timeframe keeps updating as ticks arrive (a chart update error used to crash the page).
   for (const frame of ["1분", "5분", "15분", "1시간", "1분"]) {

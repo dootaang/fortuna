@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { orderBy, query, limit, where } from "firebase/firestore";
 import {
-  COINS, COIN_IDS, NEWS_SIZE_LABELS, entryPaused, formatPrice, formatUnits, holdingValue, hourIndexAt, liveEquity, normalizeMarket,
+  COINS, COIN_IDS, NEWS_SIZE_LABELS, entryPaused, weekIndexAt, formatPrice, formatUnits, holdingValue, hourIndexAt, liveEquity, normalizeMarket,
   type CoinId, type MarketConfig, type NewsSize,
 } from "@fortuna/core";
 import { announceBossFight, cancelNews, refs, registerOracle, saveMarket, scheduleNews, setCoinPaused, voidPosition, type NewsInput } from "@fortuna/data";
@@ -21,6 +21,7 @@ export function MarketAdmin() {
       <OpenPositions market={market} />
       <Holdings />
       <NewsDesk />
+      <WeekLevies market={market} />
       <MarketEditor key={JSON.stringify(market)} market={market} />
     </div>
   );
@@ -257,6 +258,12 @@ function MarketEditor({ market }: { market: MarketConfig }) {
           <NumberField label="알트 배율 (하우스 전)" value={draft.leverage.altLocked} onChange={(altLocked) => setLeverage({ altLocked })} min={1} />
           <NumberField label="FTN 배율 (하우스 후)" value={draft.leverage.mainOpen} onChange={(mainOpen) => setLeverage({ mainOpen })} min={1} />
           <NumberField label="알트 배율 (하우스 후)" value={draft.leverage.altOpen} onChange={(altOpen) => setLeverage({ altOpen })} min={1} />
+          <NumberField label="주간 수익 상한 (0이면 끔)" value={draft.weeklyProfitCap} onChange={(weeklyProfitCap) => set({ weeklyProfitCap })} min={0} suffix="코인" />
+        </div>
+        <p className="field-label mt-4">거래소 2부 · 시장 구조</p>
+        <div className="grid gap-x-6 sm:grid-cols-2">
+          <Toggle label="NPC 거래자 (주민 군중)" checked={draft.npc.enabled} onChange={(enabled) => set({ npc: { ...draft.npc, enabled } })} hint="가상 포지션 묶음. 코인은 오가지 않고, 롱/숏·청산 지도·거래량에 섞여 보입니다." />
+          <NumberField label="군중 규모 ×" value={draft.npc.scale} step={0.1} onChange={(scale) => set({ npc: { ...draft.npc, scale } })} min={0} max={5} />
         </div>
         <p className="field-label mt-4">종목별 거래 정지 · 변동성 배수</p>
         <div className="grid gap-2 sm:grid-cols-3">
@@ -275,6 +282,34 @@ function MarketEditor({ market }: { market: MarketConfig }) {
         })}>저장</button>
       </Frame>
     </section>
+  );
+}
+
+/** 이번 주 거래소 순이익 (환전가 특별 징수 기준). */
+function WeekLevies({ market }: { market: MarketConfig }) {
+  const { players, wallets, session } = useDealer();
+  const week = weekIndexAt(session.clock.now());
+  const rows = players.map((row) => {
+    const stored = wallets.get(row.id)?.marketWeek;
+    return { id: row.id, name: row.data.name, net: stored && stored.week === week ? stored.net : 0 };
+  }).filter((row) => row.net !== 0).sort((a, b) => b.net - a.net);
+  return (
+    <Frame>
+      <SectionTitle title="이번 주 거래소 순이익" />
+      <p className="mb-2 text-xs text-mist">
+        {market.weeklyProfitCap > 0 ? `${market.weeklyProfitCap.toLocaleString("ko-KR")}코인을 넘는 몫은 지급하지 않고 금고에 남깁니다(환전가 특별 징수). 같은 주 손실은 이익을 깎고, 월요일 0시에 새로 셉니다.` : "주간 수익 상한이 꺼져 있습니다."}
+      </p>
+      {rows.length ? (
+        <ul className="grid gap-1 sm:grid-cols-2">
+          {rows.map((row) => (
+            <li key={row.id} className="flex justify-between rounded-sm border border-gold-400/20 px-2 py-1 text-sm">
+              <span>{row.name}</span>
+              <span className={cx("num", row.net > 0 ? "text-[#a9ecc9]" : "text-[#f2b3aa]")}>{row.net > 0 ? "+" : ""}{row.net.toLocaleString("ko-KR")}{market.weeklyProfitCap > 0 && row.net >= market.weeklyProfitCap ? " · 상한" : ""}</span>
+            </li>
+          ))}
+        </ul>
+      ) : <Empty>이번 주 거래소 정산이 아직 없습니다.</Empty>}
+    </Frame>
   );
 }
 
