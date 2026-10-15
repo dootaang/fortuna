@@ -1,12 +1,13 @@
 name: deploy
 
-# main에서 verify가 통과하면 Firebase(Hosting + Firestore rules/indexes)로 배포한다.
-# Actions 탭에서 수동 실행(workflow_dispatch)도 가능하다.
+# Firebase(Hosting + Firestore rules/indexes) 배포. 지금은 Actions 탭에서 수동 실행만 한다.
+# 서비스 계정(secrets.FIREBASE_SERVICE_ACCOUNT)에 "Firebase 관리자"와 "서비스 사용량 소비자" 역할을 준 뒤,
+# 아래 workflow_run 블록의 주석을 풀면 main에서 verify가 통과할 때마다 자동 배포된다.
 on:
-  workflow_run:
-    workflows: [verify]
-    types: [completed]
-    branches: [main]
+  # workflow_run:
+  #   workflows: [verify]
+  #   types: [completed]
+  #   branches: [main]
   workflow_dispatch:
 
 concurrency:
