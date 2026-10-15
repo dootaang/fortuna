@@ -1,6 +1,8 @@
 # 도시 지도와 RP 채팅 설계
 
-> 상태: 설계 확정 (2026-10-15). 아직 구현하지 않았다. 시작 신호가 오면 10절 1단계부터 만든다.
+> 상태: **1단계 구현됨 (2026-10-15)** — 휠 광장 여섯 곳, 도트 그리기 엔진, 캐릭터 꾸미기, 걷기와 장소 전환, 장소·전체 채팅(마크다운, 말풍선, 고치기·지우기), 봉인된 주사위, 접속 정보.
+> 코드: `packages/core/src/city`(지도·길찾기·주사위), `packages/data/src/city-ops.ts`, `firestore.rules`(도시 블록), `apps/fortuna/src/city`, 테스트 `packages/core/test/city.test.ts`, `packages/rules-tests/test/city.test.ts`, `e2e/city.spec.ts`.
+> 구현하면서 정한 것: 타일과 소품은 글자 격자 대신 작은 붓 함수(사각형·선·원)로 그린다(`apps/fortuna/src/city/pix.ts`). 접속 정보는 별도 문서 대신 말 문서의 `seenAt`. 새 캐릭터는 시작 칸 주변에 흩어져 나타난다. 2단계부터는 시작 신호를 기다린다.
 > 디스코드에서 하던 RP 전체를 이 웹앱으로 옮긴다. 디스코드와는 연동하지 않는다.
 
 캐릭터는 도트 그림 JRPG식 도시 지도를 걸어 다니며, 옆의 채팅창으로 RP를 한다. 코코포리아나 Roll20 같은 사이트와 비슷하지만,

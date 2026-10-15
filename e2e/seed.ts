@@ -142,3 +142,22 @@ export async function startRecorder(everyMs = 1_000): Promise<{ stop: () => Prom
     stop: async () => { running = false; await loop; await deleteApp(app).catch(() => undefined); },
   };
 }
+
+/** Act as a player from a second device (same access code) through the real data layer. */
+export async function withPlayer<T>(code: string, fn: (session: import("@fortuna/data").PlayerSession) => Promise<T>): Promise<T> {
+  const { signInAnonymously } = await import("firebase/auth");
+  const { bindAccessCode } = await import("@fortuna/data");
+  const app = initializeApp({ projectId: PROJECT, apiKey: "demo-key", authDomain: `${PROJECT}.firebaseapp.com` }, `device-${Date.now()}-${Math.random()}`);
+  const auth = getAuth(app);
+  connectAuthEmulator(auth, `http://${AUTH}`, { disableWarnings: true });
+  const db = getFirestore(app);
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  try {
+    const { user } = await signInAnonymously(auth);
+    const pid = await bindAccessCode({ db, uid: user.uid, clock: new Clock() }, code);
+    return await fn({ db, uid: user.uid, pid, clock: new Clock() });
+  } finally {
+    await terminate(db).catch(() => undefined);
+    await deleteApp(app).catch(() => undefined);
+  }
+}

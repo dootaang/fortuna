@@ -20,3 +20,7 @@ export * from "./market/feed.ts";
 export * from "./market/engine.ts";
 export * from "./market/tape.ts";
 export * from "./market/spot.ts";
+export * from "./city/types.ts";
+export * from "./city/maps.ts";
+export * from "./city/walk.ts";
+export * from "./city/sprite.ts";

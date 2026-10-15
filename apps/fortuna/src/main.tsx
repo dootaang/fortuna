@@ -20,6 +20,7 @@ const router = createBrowserRouter([
     errorElement: <RouteError />,
     children: [
       { index: true, element: <Lobby /> },
+      { path: "city", lazy: page(() => import("./city/CityPage.tsx")) },
       { path: "work", lazy: page(() => import("./pages/WorkHub.tsx")) },
       { path: "work/:template", lazy: page(() => import("./work/WorkShift.tsx")) },
       { path: "alley", lazy: page(() => import("./pages/AlleyPage.tsx")) },

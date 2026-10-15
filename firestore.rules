@@ -960,6 +960,53 @@ service cloud.firestore {
         && getAfter(holdingPath(e.playerId, d.coin)).data.lastLedger == entryId;
     }
 
+    // ── 도시 지도와 RP 채팅 ── (docs/SPEC-CITY-MAP.md) 코인은 움직이지 않는다. 이동은 꾸밈이라 자기 말인지와 형식만 본다.
+    function cityPlayer() { return signedIn() && exists(bindingPath()) && isPlayer(myPid()); }
+
+    match /actors/{pid} {
+      allow read: if isAdmin() || cityPlayer();
+      allow create: if signedIn() && isPlayer(pid) && actorOk(pid, request.resource.data)
+        && request.resource.data.at == request.time;
+      allow update: if signedIn() && isPlayer(pid) && actorOk(pid, request.resource.data)
+        && (request.resource.data.at == request.time || request.resource.data.at == resource.data.at);
+      allow delete: if isAdmin();
+    }
+
+    function actorOk(pid, a) {
+      return a.keys().hasOnly(['kind', 'name', 'sprite', 'place', 'fx', 'fy', 'tx', 'ty', 'at', 'seenAt'])
+        && a.kind == 'pc' && a.name == get(playerPath(pid)).data.name
+        && a.sprite is map && a.sprite.keys().hasOnly(['skin', 'hair', 'hairColor', 'outfit', 'outfitColor', 'accessory'])
+        && a.place is string && a.place.matches('[a-z0-9-]{1,40}')
+        && cellOk(a.fx) && cellOk(a.fy) && cellOk(a.tx) && cellOk(a.ty)
+        && a.seenAt == request.time;
+    }
+    function cellOk(n) { return n is int && n >= 0 && n < 200; }
+
+    match /messages/{id} {
+      allow read: if isAdmin() || cityPlayer();
+      allow create: if cityPlayer() && messageOk(request.resource.data);
+      // 주사위는 고치거나 지울 수 없다(결과가 메시지 id와 시각에 묶여 있다).
+      allow update: if cityPlayer() && resource.data.authorId == myPid() && editOk(resource.data, request.resource.data);
+      allow delete: if false;
+    }
+
+    function messageOk(m) {
+      return m.keys().hasOnly(['channel', 'kind', 'authorId', 'authorName', 'text', 'at', 'editedAt', 'deleted'])
+        && m.authorId == myPid() && m.authorName == get(playerPath(myPid())).data.name
+        && m.channel is string && (m.channel == 'global' || m.channel.matches('place:[a-z0-9-]{1,40}'))
+        && m.kind in ['say', 'act', 'roll']
+        && m.text is string && m.text.size() >= 1 && m.text.size() <= 2000
+        && (m.kind != 'roll' || m.text.matches('[0-9]{1,2}d[0-9]{1,3}([+-][0-9]{1,3})?'))
+        && m.at == request.time && m.editedAt == null && m.deleted == false;
+    }
+
+    function editOk(m0, m1) {
+      return m0.kind != 'roll' && m0.deleted == false
+        && onlyChanged(m0, m1, ['text', 'editedAt', 'deleted'])
+        && m1.editedAt == request.time
+        && ((m1.deleted == true && m1.text == '') || (m1.deleted == false && m1.text is string && m1.text.size() >= 1 && m1.text.size() <= 2000));
+    }
+
     // ── 디스코드 알림 ──
     // 이벤트 문서는 근거 장부(또는 관리자)가 있어야 만들 수 있다. 중계 Worker가 읽고 sentAt을 찍는다.
     match /events/{id} {

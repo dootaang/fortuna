@@ -1,0 +1,30 @@
+/* 도시: 휴대폰은 위 지도 · 아래 채팅, 넓은 화면은 왼쪽 지도 · 오른쪽 채팅 */
+@layer components {
+  .pixelated { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+  .city-shell {
+    position: fixed; left: 0; right: 0; top: var(--hdr, 57px); bottom: var(--nav, 61px); z-index: 10;
+    display: flex; flex-direction: column; background: #0b0809;
+  }
+  .city-map { flex: 0 0 55%; min-height: 0; border-bottom: 1px solid var(--gold-line); }
+  .city-chat { flex: 1 1 auto; min-height: 0; }
+  .city-chat-tall .city-map { flex-basis: 30%; }
+  @media (min-width: 768px) {
+    .city-shell { flex-direction: row; }
+    .city-map { flex: 1 1 auto; border-bottom: 0; border-right: 1px solid var(--gold-line); }
+    .city-chat { flex: 0 0 380px; }
+    .city-chat-tall .city-map { flex-basis: auto; }
+  }
+
+  .city-plate {
+    border: 1px solid var(--gold-line); border-radius: 3px; padding: 0.3rem 0.55rem;
+    background: color-mix(in oklab, var(--color-felt-950) 82%, transparent); backdrop-filter: blur(3px);
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, #000 60%, transparent);
+  }
+  .city-btn {
+    display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: 3px;
+    border: 1px solid var(--gold-line); color: var(--color-gold-200);
+    background: color-mix(in oklab, var(--color-felt-950) 85%, transparent); font-size: 1rem;
+  }
+  .city-btn:disabled { opacity: 0.4; }
+}
