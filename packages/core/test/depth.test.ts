@@ -46,6 +46,27 @@ describe("crowd", () => {
     expect(JSON.stringify(tickFromState(state, 0))).not.toMatch(/NaN|null/);
   });
 
+  it("stays informative on coins the dealer made more volatile (production: FTN ×4, the rest ×2)", () => {
+    const start = Date.UTC(2026, 9, 12, 3, 0);
+    const config = { ...DEFAULT_MARKET, coins: Object.fromEntries(COIN_IDS.map((id) => [id, { enabled: true, paused: false, volMult: id === "FTN" ? 4 : 2 }])) as typeof DEFAULT_MARKET.coins };
+    let state = initialMarketState(tickSeq(start, TICK), start);
+    const pinned: Record<string, number> = {}, size: Record<string, number> = {};
+    const ticks = 2 * 24 * 240;
+    for (let index = 1; index <= ticks; index += 1) {
+      const atMs = start + index * TICK * 1000, seq = tickSeq(atMs, TICK), keys = seedKeys(seq, atMs, TICK);
+      state = stepMarket(state, { seq, atMs, seeds: { tick: marketSeed(SECRET, keys.tick), blcNow: 1, blcPast: 1, s9Week: 1 }, config }).state;
+      for (const id of COIN_IDS) {
+        const crowd = state.coins[id].npc!;
+        if (crowd.lr <= 0.2 || crowd.lr >= 0.8) pinned[id] = (pinned[id] ?? 0) + 1;
+        size[id] = (size[id] ?? 0) + crowd.oi / CROWD_BASE[id];
+      }
+    }
+    for (const id of COIN_IDS) {
+      expect((pinned[id] ?? 0) / ticks, `${id} long share pinned to a bound`).toBeLessThan(0.15);
+      expect(size[id]! / ticks, `${id} average crowd size`).toBeGreaterThan(0.75);
+    }
+  });
+
   it("follows a rally late, then a sharp drop liquidates its longs", () => {
     const rng = new XorShift32(7);
     let crowd = initialCrowd("HBT", 25_000), price = 25_000;

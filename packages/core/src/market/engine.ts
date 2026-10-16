@@ -241,7 +241,7 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
     const z = (Math.log(p) - lp0) / Math.max(1e-9, sigma);
     let crowd: Crowd | undefined, liquidated = 0;
     if (npc.enabled && npc.scale > 0) {
-      const moved = stepCrowd(cs.npc ?? initialCrowd(id, cs.p, npc.scale), id, cs.p, p, hours, z, Math.sqrt(rv) / Math.max(1e-9, sigma), npc.scale, crowdRng);
+      const moved = stepCrowd(cs.npc ?? initialCrowd(id, cs.p, npc.scale), id, cs.p, p, hours, z, Math.sqrt(rv) / Math.max(1e-9, sigma), npc.scale, crowdRng, config.coins[id]?.volMult ?? 1);
       crowd = moved.crowd; liquidated = moved.liquidated; flow[id] = Math.round(moved.flow);
     }
     next.coins[id] = {

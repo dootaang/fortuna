@@ -33,9 +33,15 @@ export function initialCrowd(coin: CoinId, price: number, scale = 1): Crowd {
   return { oi: Math.round(CROWD_BASE[coin] * scale), lr: 0.5, px: price };
 }
 
+/**
+ * How far from entry a crowd position of `lev` is liquidated. On a coin the dealer made more volatile (volMult)
+ * the crowd uses proportionally less leverage, so its liquidations stay as rare as on a normal coin.
+ */
+function liqMove(lev: number, volScale: number): number { return Math.min(0.95, (0.9 / lev) * Math.max(1, volScale)); }
+
 /** Fraction of the crowd's longs (or shorts) of one leverage already liquidated at `price`. */
-function goneFraction(side: Side, px: number, lev: number, price: number): number {
-  const move = 0.9 / lev, centre = side === "long" ? px * (1 - move) : px * (1 + move), half = px * move * SPREAD;
+function goneFraction(side: Side, px: number, lev: number, price: number, volScale: number): number {
+  const move = liqMove(lev, volScale), centre = side === "long" ? px * (1 - move) : px * (1 + move), half = px * move * SPREAD;
   const f = side === "long" ? (centre + half - price) / (2 * half) : (price - (centre - half)) / (2 * half);
   return Math.min(1, Math.max(0, f));
 }
@@ -58,11 +64,11 @@ export interface CrowdStep {
  * leans back to even, is liquidated when the price runs through its liquidation band, and refills
  * toward its usual size (larger when the market is wild).
  */
-export function stepCrowd(crowd: Crowd, coin: CoinId, prevPrice: number, price: number, hours: number, z: number, wild: number, scale: number, rng: XorShift32): CrowdStep {
+export function stepCrowd(crowd: Crowd, coin: CoinId, prevPrice: number, price: number, hours: number, z: number, wild: number, scale: number, rng: XorShift32, volScale = 1): CrowdStep {
   let long = crowd.oi * crowd.lr, short = crowd.oi * (1 - crowd.lr), liquidated = 0;
   for (const { lev, w } of CROWD_LEVERAGE) {
     for (const side of ["long", "short"] as const) {
-      const before = goneFraction(side, crowd.px, lev, prevPrice), after = goneFraction(side, crowd.px, lev, price);
+      const before = goneFraction(side, crowd.px, lev, prevPrice, volScale), after = goneFraction(side, crowd.px, lev, price, volScale);
       if (after <= before || before >= 1) continue;
       const share = w * ((after - before) / (1 - before));
       if (side === "long") { const cut = long * share; long -= cut; liquidated += cut; }
@@ -70,12 +76,15 @@ export function stepCrowd(crowd: Crowd, coin: CoinId, prevPrice: number, price: 
     }
   }
   const oi0 = long + short;
-  let lr = oi0 > 0 ? long / oi0 : 0.5;
-  lr += (0.15 * Math.max(-3, Math.min(3, z)) - 0.5 * (lr - 0.5)) * hours + 0.05 * Math.sqrt(hours) * normal(rng);
-  lr = Math.min(0.8, Math.max(0.2, lr));
+  // Newcomers refill the crowd evenly; those leaving leave in proportion.
   const target = CROWD_BASE[coin] * scale * (1 + 0.5 * Math.min(1, Math.max(0, wild - 1)));
   const refill = (target - oi0) * (1 - Math.exp(-hours / 3));
-  const oi = Math.max(0, oi0 + refill);
+  if (refill > 0) { long += refill / 2; short += refill / 2; } else if (oi0 > 0) { long += (refill * long) / oi0; short += (refill * short) / oi0; }
+  const oi = Math.max(0, long + short);
+  // Trend-following: about +0.12 of long share per sigma of last hour's move, leaning back to even.
+  let lr = oi > 0 ? long / oi : 0.5;
+  lr += (0.06 * Math.max(-3, Math.min(3, z)) - 0.5 * (lr - 0.5)) * hours + 0.05 * Math.sqrt(hours) * normal(rng);
+  lr = Math.min(0.8, Math.max(0.2, lr));
   const churn = oi * (6 / 24) * hours * (1 + Math.min(3, Math.abs(z)));
   const px = crowd.px + (price - crowd.px) * (1 - Math.exp(-hours / 2));
   return { crowd: { oi: Math.round(oi), lr: Math.round(lr * 1_000) / 1_000, px: Math.round(px) }, liquidated, flow: churn + Math.abs(refill) + liquidated };
@@ -101,13 +110,13 @@ export interface CoinStructure {
 }
 
 /** Long/short and the liquidation map of one coin. */
-export function coinStructure(coin: CoinId, price: number, crowd: Crowd | undefined, lots: readonly OpenLot[]): CoinStructure {
+export function coinStructure(coin: CoinId, price: number, crowd: Crowd | undefined, lots: readonly OpenLot[], volScale = 1): CoinStructure {
   let long = 0, short = 0;
   const down = [0, 0, 0, 0, 0], up = [0, 0, 0, 0, 0];
   if (crowd) {
     long += crowd.oi * crowd.lr; short += crowd.oi * (1 - crowd.lr);
     for (const { lev, w } of CROWD_LEVERAGE) {
-      const move = 0.9 / lev, half = crowd.px * move * SPREAD;
+      const move = liqMove(lev, volScale), half = crowd.px * move * SPREAD;
       for (const side of ["long", "short"] as const) {
         const centre = side === "long" ? crowd.px * (1 - move) : crowd.px * (1 + move);
         const points = Array.from({ length: POINTS }, (_, i) => centre - half + (2 * half * (i + 0.5)) / POINTS)
@@ -167,7 +176,7 @@ export function buildStructure(state: Pick<MarketState, "coins">, lots: readonly
   let long = 0, open = 0, liquidated = 0;
   const coins = {} as FearGreedInput["coins"];
   for (const id of COIN_IDS) {
-    const tick = state.coins[id], structure = coinStructure(id, tick.p, tick.npc, lots);
+    const tick = state.coins[id], structure = coinStructure(id, tick.p, tick.npc, lots, volMult(id));
     ls[id] = structure.ls; lm[id] = structure.lm;
     long += structure.ls[0]; open += structure.ls[0] + structure.ls[1]; liquidated += tick.lq ?? 0;
     const sigma = usualSigma(id, volMult(id));
