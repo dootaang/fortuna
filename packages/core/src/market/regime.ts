@@ -24,10 +24,10 @@ export interface RegimeDef {
 
 export const REGIME: Readonly<Record<RegimeKind, RegimeDef>> = {
   sideways: { label: "횡보", hours: 6, ftnDrift: 0, beta: (beta) => beta, ownVol: 1 },
-  bull: { label: "상승장", hours: 4, ftnDrift: 0.002, beta: (beta) => beta, ownVol: 1 },
+  bull: { label: "상승장", hours: 4, ftnDrift: 0.0018, beta: (beta) => beta, ownVol: 1 },
   // Bear is gentler than bull because panics (fear) also fall: over time the drifts net to zero, so the pull
   // back to the anchor does not hand the bull side a free edge.
-  bear: { label: "하락장", hours: 4, ftnDrift: -0.0013, beta: (beta) => Math.min(0.9, beta * 1.3), ownVol: 1.2 },
+  bear: { label: "하락장", hours: 4, ftnDrift: -0.0011, beta: (beta) => Math.min(0.9, beta * 1.3), ownVol: 1.2 },
   fear: { label: "공포", hours: 40 / 60, ftnDrift: -0.006, beta: (beta) => 1 - (1 - beta) * 0.2, ownVol: 1.5 },
   altseason: { label: "알트 시즌", hours: 3, ftnDrift: 0, beta: (beta) => beta * 0.3, ownVol: 1.6 },
 };

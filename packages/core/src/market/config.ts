@@ -58,6 +58,9 @@ export interface MarketConfig {
   autoNews: boolean;
   /** 4단계: the hidden market regime. */
   regimes: boolean;
+  /** 5단계: hourly funding on futures, and crowd liquidation cascades. */
+  funding: boolean;
+  cascade: boolean;
 }
 
 export const DEFAULT_MARKET: MarketConfig = {
@@ -84,6 +87,8 @@ export const DEFAULT_MARKET: MarketConfig = {
   earnings: true,
   autoNews: true,
   regimes: true,
+  funding: true,
+  cascade: true,
 };
 
 const int = (value: unknown, fallback: number, min = 0, max = 1e9) => Math.round(numberOr(value, fallback, min, max));
@@ -127,6 +132,8 @@ export function normalizeMarket(raw: unknown): MarketConfig {
     earnings: bool(source.earnings, d.earnings),
     autoNews: bool(source.autoNews, d.autoNews),
     regimes: bool(source.regimes, d.regimes),
+    funding: bool(source.funding, d.funding),
+    cascade: bool(source.cascade, d.cascade),
   };
 }
 

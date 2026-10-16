@@ -5,7 +5,7 @@ import { DAY_MS, KST_OFFSET_MS, WEEK_MS, dayIndexAt, weekIndexAt, weekStartMs } 
 import { COIN_IDS, COINS, coinForDistrict, isMoonlessNight, type CoinId } from "./coins.ts";
 import type { MarketConfig } from "./config.ts";
 import { FEED_TEXT, NEWS_SIZES, liberationFeed, type FeedItem, type NewsSize } from "./feed.ts";
-import { crowdSeed, initialCrowd, stepCrowd, usualSigma, type Crowd } from "./crowd.ts";
+import { cascadeMove, crowdSeed, initialCrowd, liquidateCrowd, stepCrowd, usualSigma, type Crowd } from "./crowd.ts";
 import { initialRegime, regimeEffect, regimeSeed, stepRegime, type Regime, type RegimeKind } from "./regime.ts";
 import { NEWS_FACTOR_HOURS, newsSeed, stepAutoNews, type PendingNews } from "./autonews.ts";
 import { PEAD, PEAD_HOURS, PRE_BAKE, earningsAt, earningsFeed, earningsJump, heatShare, nextFf, rateFeed, rateShock } from "./fundamentals.ts";
@@ -53,6 +53,8 @@ export interface CoinTick {
   ndu?: number | undefined;
   /** News factor on the anchor (0.7–1.4): the lasting part of stories, fading back to 1 over days. */
   nf?: number | undefined;
+  /** 5단계 펀딩: cumulative funding index in ppm (the recorder adds an hour's rate at each full hour). */
+  F?: number | undefined;
 }
 
 export interface MarketState {
@@ -92,7 +94,7 @@ export interface StepInput {
   seq: number;
   atMs: number;
   seeds: StepSeeds;
-  config: Pick<MarketConfig, "tickSeconds" | "debtLink" | "coins"> & { npc?: MarketConfig["npc"] | undefined; earnings?: boolean | undefined; autoNews?: boolean | undefined; regimes?: boolean | undefined };
+  config: Pick<MarketConfig, "tickSeconds" | "debtLink" | "coins"> & { npc?: MarketConfig["npc"] | undefined; earnings?: boolean | undefined; autoNews?: boolean | undefined; regimes?: boolean | undefined; cascade?: boolean | undefined };
   world?: WorldInput | undefined;
   news?: NewsShock[] | undefined;
   fundamentals?: FundamentalsInput | undefined;
@@ -317,7 +319,7 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
     const base = def.anchor;
     // A halted coin (dealer circuit breaker) keeps its price, so nothing liquidates while nobody can trade it.
     const halted = config.coins[id]?.enabled === false;
-    const p = halted ? cs.p : Math.min(base * 50, Math.max(Math.max(1, Math.round(base / 50)), Math.round(cs.p * Math.exp(r))));
+    let p = halted ? cs.p : Math.min(base * 50, Math.max(Math.max(1, Math.round(base / 50)), Math.round(cs.p * Math.exp(r))));
     // 거래소 2부: hour-long averages and the crowd.
     const k = 1 - Math.exp(-hours), sigma = usualSigma(id, config.coins[id]?.volMult ?? 1);
     const lp0 = cs.lp ?? Math.log(cs.p), step = Math.log(p / cs.p);
@@ -325,15 +327,24 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
     const z = (Math.log(p) - lp0) / Math.max(1e-9, sigma);
     let crowd: Crowd | undefined, liquidated = 0;
     if (npc.enabled && npc.scale > 0) {
-      const moved = stepCrowd(cs.npc ?? initialCrowd(id, cs.p, npc.scale), id, cs.p, p, hours, z, Math.sqrt(rv) / Math.max(1e-9, sigma), npc.scale, crowdRng, config.coins[id]?.volMult ?? 1);
+      const volScale = config.coins[id]?.volMult ?? 1;
+      const moved = stepCrowd(cs.npc ?? initialCrowd(id, cs.p, npc.scale), id, cs.p, p, hours, z, Math.sqrt(rv) / Math.max(1e-9, sigma), npc.scale, crowdRng, volScale);
       crowd = moved.crowd; liquidated = moved.liquidated; flow[id] = Math.round(moved.flow);
+      // 청산 연쇄: one more push the same way, within this tick, without cascading again.
+      const extra = halted || config.cascade === false ? 0 : cascadeMove(moved);
+      if (extra) {
+        const pushed = Math.min(base * 50, Math.max(Math.max(1, Math.round(base / 50)), Math.round(p * Math.exp(extra))));
+        const after = liquidateCrowd(crowd, p, pushed, volScale);
+        crowd = after.crowd; liquidated += after.liquidated; flow[id] += Math.round(after.liquidated);
+        p = pushed;
+      }
     }
     next.coins[id] = {
       p, af, storm, boost: boost.boost, boostUntil: boost.until, mom: 0.8 * cs.mom + 0.2 * noise,
       npc: crowd, lp: Math.round((lp0 + (Math.log(p) - lp0) * k) * 1e6) / 1e6, rv: Math.round(rv * 1e8) / 1e8,
       lq: Math.round((cs.lq ?? 0) * Math.exp(-hours) + liquidated),
       ff, pre: Math.round(pre * 1e6) / 1e6, drift: Math.round(drift * 1e7) / 1e7, driftUntil, spc, eh,
-      an: an ?? undefined, nd: Math.round(nd * 1e7) / 1e7, ndu, nf: Math.round(Math.exp(lognf) * 1e5) / 1e5,
+      an: an ?? undefined, nd: Math.round(nd * 1e7) / 1e7, ndu, nf: Math.round(Math.exp(lognf) * 1e5) / 1e5, F: cs.F,
     };
   }
   return { state: next, feed, flow };

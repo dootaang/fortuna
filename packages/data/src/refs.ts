@@ -103,6 +103,9 @@ export interface PositionDoc {
   outcome: "close" | "cap" | "liquidated" | "refund" | null;
   payout: number | null;
   lastLedger: string;
+  /** 5단계 펀딩: index (ppm) at entry, and at the tick the recorder ended it. Missing on older positions. */
+  F0?: number | null;
+  exitF?: number | null;
 }
 
 /** holdings/{pid}_{coin}: spot coins owned, in 1/10,000 units, and the coins paid for them. */

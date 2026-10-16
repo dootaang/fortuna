@@ -21,6 +21,7 @@ export * from "./market/indicators.ts";
 export * from "./market/fundamentals.ts";
 export * from "./market/autonews.ts";
 export * from "./market/regime.ts";
+export * from "./market/funding.ts";
 export * from "./market/feed.ts";
 export * from "./market/engine.ts";
 export * from "./market/tape.ts";

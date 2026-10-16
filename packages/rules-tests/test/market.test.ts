@@ -399,3 +399,50 @@ describe("hidden regime (거래소 2부 4단계)", () => {
   });
 });
 
+describe("funding (거래소 2부 5단계)", () => {
+  /** Move a coin's funding index in the newest tick (rules off), as an hour of funding would. */
+  async function fund(coin: CoinId, ppm: number) {
+    const path = `market/h${Math.floor(clockMs / 3_600_000)}`;
+    await asRoot((root) => root.doc(path).update({ [`last.st.coins.${coin}.F`]: ppm }));
+  }
+
+  it("charges longs and pays shorts as the index moves, and refuses a settlement that skips it", async () => {
+    await saveMarket(admin, { ...DEFAULT_MARKET, weeklyProfitCap: 1 });
+    const long = await openPosition(player, { coin: "FTN", side: "long", leverage: 5, margin: 200 });
+    const short = await openPosition(player, { coin: "FTN", side: "short", leverage: 5, margin: 200 });
+    expect((await rootData(`positions/${long.positionId}`))!.F0).toBe(0);
+    await tick();
+    await fund("FTN", 1_000); // +0.1%: longs pay, shorts receive
+
+    // Skipping the funding is refused.
+    await denied(runTransaction(player.db, async (tx) => {
+      const wallet = await readWallet(tx, player), { hour, tick: last } = await readLatestTick(tx, player.db, Date.now());
+      const position = (await tx.get(refs.position(player.db, long.positionId))).data()!;
+      const quote = quoteClose(DEFAULT_MARKET, { coin: "FTN", side: "long", leverage: 5, margin: 200, fee: position.fee, entry: position.entry, openedAtMs: position.openedAt.toMillis(), F0: 0 }, "close", last.p.FTN, Date.now(), 0);
+      const id = writeEntry(tx, player, player.pid, wallet, {
+        type: "marketClose", actor: "player", delta: quote.payout, vaultDelta: -quote.payout,
+        detail: { positionId: long.positionId, coin: "FTN", side: "long", leverage: 5, margin: 200, kind: "close", exit: quote.exit, hour, seq: last.seq, hours: quote.hours, pnl: quote.pnl, interest: quote.interest, fee: quote.fee, funding: 0, payout: quote.payout, levy: 0 },
+        wallet: { market: { ...(wallet.market ?? { period: 0, used: 0, open: 2 }), open: (wallet.market?.open ?? 2) - 1 }, marketWeek: { week: weekIndexAt(Date.now()), net: quote.payout - 200 - position.fee } },
+      });
+      tx.update(refs.position(player.db, long.positionId), { status: "closed", outcome: "close", payout: quote.payout, lastLedger: id, exit: quote.exit, exitSeq: last.seq, exitAt: serverTimestamp() });
+    }));
+
+    const closedLong = await closePosition(player, long.positionId);
+    const closedShort = await closePosition(player, short.positionId);
+    expect(closedLong.quote.funding).toBe(1); // floor(1000 × 1000 / 1e6)
+    expect(closedShort.quote.funding).toBe(-1);
+    expect((await rootData(`ledger/${closedLong.ledgerId}`))!.detail.funding).toBe(1);
+  });
+
+  it("books a capped position with the index the recorder stamped when it ended it", async () => {
+    const { positionId, quote } = await openPosition(player, { coin: "LNH", side: "long", leverage: 3, margin: 100 });
+    await fund("LNH", 2_000);
+    // The recorder caps it on the next tick and stamps exitF.
+    const hour = `market/h${Math.floor((clockMs + 15_000) / 3_600_000)}`;
+    void hour;
+    await asRoot((root) => root.doc(`positions/${positionId}`).update({ status: "capped", exit: quote.cap, exitSeq: 1, exitAt: new Date(), exitF: 2_000 }));
+    const result = await closePosition(player, positionId);
+    expect(result.quote.funding).toBe(Math.floor((300 * 2_000) / 1_000_000));
+  });
+});
+

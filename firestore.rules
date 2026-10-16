@@ -803,9 +803,9 @@ service cloud.firestore {
     // 기록원: 새 시세가 청산가나 수익 상한에 닿은 포지션을 표시만 한다(코인은 움직이지 않는다).
     function oracleEndOk(p0, p1) {
       return p0.status == 'open'
-        && onlyChanged(p0, p1, ['status', 'exit', 'exitSeq', 'exitAt'])
+        && onlyChanged(p0, p1, ['status', 'exit', 'exitSeq', 'exitAt', 'exitF'])
         && ((p1.status == 'liquidated' && p1.exit == p0.liq) || (p1.status == 'capped' && p0.cap > 0 && p1.exit == p0.cap))
-        && p1.exitSeq is int && p1.exitAt is timestamp;
+        && p1.exitSeq is int && p1.exitAt is timestamp && p1.get('exitF', 0) is int;
     }
 
     // 지금 가장 최신 틱인가: 같은 시간 문서의 last이고, 다음 시간 문서가 아직 없고, 너무 오래되지 않았다.
@@ -879,11 +879,16 @@ service cloud.firestore {
         && onlyChanged(p0, p1, ['status', 'outcome', 'exit', 'exitSeq', 'exitAt', 'payout', 'lastLedger'])
         && p1.status == 'closed' && p1.outcome == d.kind && p1.payout == d.payout
         && (d.kind == 'close' ? (p1.exit == d.exit && p1.exitSeq == d.seq && p1.exitAt == request.time)
-                              : (p1.exit == p0.exit && p1.exitSeq == p0.exitSeq && p1.exitAt == p0.exitAt));
+                              : (p1.exit == p0.exit && p1.exitSeq == p0.exitSeq && p1.exitAt == p0.exitAt))
+        && (d.kind == 'close' ? closeMathOk(d, p0, marketConfig(), request.time, get(marketPath(d.hour)).data.last.st.coins[p0.coin].get('F', 0))
+            : d.kind == 'cap' ? closeMathOk(d, p0, marketConfig(), p0.exitAt, p0.get('exitF', p0.get('F0', 0)))
+            : true);
     }
 
     function positionOk(id, p, d, pid, m) {
-      return p.keys().hasOnly(['playerId', 'coin', 'side', 'leverage', 'margin', 'fee', 'entry', 'entrySeq', 'openedAt', 'liq', 'cap', 'status', 'exit', 'exitSeq', 'exitAt', 'outcome', 'payout', 'lastLedger'])
+      return p.keys().hasOnly(['playerId', 'coin', 'side', 'leverage', 'margin', 'fee', 'entry', 'entrySeq', 'openedAt', 'liq', 'cap', 'status', 'exit', 'exitSeq', 'exitAt', 'outcome', 'payout', 'lastLedger', 'F0'])
+        // 펀딩(5단계): 진입 틱의 누적 펀딩 지수를 기록한다.
+        && p.get('F0', 0) == get(marketPath(d.hour)).data.last.st.coins[d.coin].get('F', 0)
         && p.playerId == pid && p.coin == d.coin && p.side == d.side && p.leverage == d.leverage && p.margin == d.margin && p.fee == d.fee
         && p.entry == d.entry && p.entrySeq == d.seq && p.openedAt == request.time && p.status == 'open'
         && p.exit == null && p.exitSeq == null && p.exitAt == null && p.outcome == null && p.payout == null && p.lastLedger == id
@@ -899,15 +904,16 @@ service cloud.firestore {
       let m = marketConfig();
       let c0 = marketCounters(before);
       let manual = d.kind == 'close';
-      return d.keys().hasOnly(['positionId', 'coin', 'side', 'leverage', 'margin', 'kind', 'exit', 'hour', 'seq', 'hours', 'pnl', 'interest', 'fee', 'payout', 'levy'])
+      return d.keys().hasOnly(['positionId', 'coin', 'side', 'leverage', 'margin', 'kind', 'exit', 'hour', 'seq', 'hours', 'pnl', 'interest', 'fee', 'funding', 'payout', 'levy'])
         && p0.playerId == e.playerId
         && d.coin == p0.coin && d.side == p0.side && d.leverage == p0.leverage && d.margin == p0.margin
-        && ((manual && p0.status == 'open' && closeExitOk(d, p0, m) && closeMathOk(d, p0, m, request.time))
-            || (d.kind == 'cap' && p0.status == 'capped' && d.exit == p0.exit && d.hour == null && d.seq == null && closeMathOk(d, p0, m, p0.exitAt))
+        // 손익·이자·펀딩·수수료·지급액 계산은 함께 바뀌는 포지션 문서 규칙(settleOk)이 검증한다(식 1000개 한도 때문에 나눈다).
+        && ((manual && p0.status == 'open' && closeExitOk(d, p0, m))
+            || (d.kind == 'cap' && p0.status == 'capped' && d.exit == p0.exit && d.hour == null && d.seq == null)
             || (d.kind == 'liquidated' && p0.status == 'liquidated' && d.exit == p0.exit && d.hour == null && d.seq == null
-                && d.hours == 0 && d.pnl == -d.margin && d.interest == 0 && d.fee == 0 && d.payout == 0)
+                && d.hours == 0 && d.pnl == -d.margin && d.interest == 0 && d.fee == 0 && d.get('funding', 0) == 0 && d.payout == 0)
             || (d.kind == 'refund' && p0.status == 'void' && d.exit == p0.entry && d.hour == null && d.seq == null
-                && d.hours == 0 && d.pnl == 0 && d.interest == 0 && d.fee == 0 && d.payout == d.margin))
+                && d.hours == 0 && d.pnl == 0 && d.interest == 0 && d.fee == 0 && d.get('funding', 0) == 0 && d.payout == d.margin))
         && p1.status == 'closed' && p1.lastLedger == entryId
         && weekOk(d, before, after, d.payout - (p0.margin + p0.fee), m)
         && e.delta == d.payout - d.levy && e.debtDelta == 0 && e.vaultDelta == d.levy - d.payout
@@ -937,16 +943,20 @@ service cloud.firestore {
 
     // 손익 = floor(명목가 × 가격 변화 / 진입가), 이자 = floor(빌린 돈 × 시간 × interestBps / 10000),
     // 청산 수수료 = 진입 수수료 (무월 코인은 밤 0~5시에 nightFeeMultiplier배), 지급 = max(0, 증거금 + min(손익, 상한) − 이자 − 수수료)
-    function closeMathOk(d, p0, m, closedAt) {
+    // 펀딩 = floor(명목가 × (F − F₀) × 방향 / 1,000,000), 롱은 F가 오르면 내고 숏은 받는다. F₀ 없는 예전 포지션은 0.
+    function closeMathOk(d, p0, m, closedAt, F) {
       let notional = p0.margin * p0.leverage;
+      let F0 = p0.get('F0', null);
+      let funding = d.get('funding', 0);
       let elapsedMs = closedAt.toMillis() - p0.openedAt.toMillis();
       let night = p0.coin == 'MWL' && (closedAt.toMillis() + 32400000) % 86400000 < 18000000;
       let gain = d.pnl < p0.margin * m.capMultiple ? d.pnl : p0.margin * m.capMultiple;
-      let raw = p0.margin + gain - d.interest - d.fee;
+      let raw = p0.margin + gain - d.interest - d.fee - funding;
       return d.hours is int && d.hours >= 1 && elapsedMs <= d.hours * 3600000 && (d.hours == 1 || elapsedMs > (d.hours - 1) * 3600000)
         && isFloor(d.pnl, notional * (p0.side == 'long' ? d.exit - p0.entry : p0.entry - d.exit), p0.entry)
         && isBpsFloor(d.interest, (notional - p0.margin) * d.hours, m.interestBps)
         && d.fee == p0.fee * (night ? m.nightFeeMultiplier : 1)
+        && (F0 == null ? funding == 0 : isFloor(funding, notional * (F - F0) * (p0.side == 'long' ? 1 : -1), 1000000))
         && d.payout == (raw > 0 ? raw : 0);
     }
 

@@ -141,7 +141,7 @@ export function describeEntry(entry: LedgerEntry<Timestamp>): string {
     case "marketOpen": return `${detail.coin} ${detail.side === "short" ? "숏" : "롱"} ${detail.leverage}배 · 증거금 ${detail.margin} + 수수료 ${detail.fee}`;
     case "marketClose": {
       const kind = ({ close: "청산", cap: "자동 익절", liquidated: "강제 청산", refund: "무효 환불" } as Record<string, string>)[detail.kind] ?? "정산";
-      return `${detail.coin} ${detail.side === "short" ? "숏" : "롱"} ${detail.leverage}배 ${kind}${detail.kind === "close" || detail.kind === "cap" ? ` · 손익 ${detail.pnl} · 이자 ${detail.interest} · 수수료 ${detail.fee}` : ""}${detail.levy ? ` · 환전가 특별 징수 ${detail.levy}` : ""}`;
+      return `${detail.coin} ${detail.side === "short" ? "숏" : "롱"} ${detail.leverage}배 ${kind}${detail.kind === "close" || detail.kind === "cap" ? ` · 손익 ${detail.pnl} · 이자 ${detail.interest} · 수수료 ${detail.fee}${detail.funding ? ` · 펀딩 ${detail.funding > 0 ? "−" : "+"}${Math.abs(detail.funding)}` : ""}` : ""}${detail.levy ? ` · 환전가 특별 징수 ${detail.levy}` : ""}`;
     }
     case "spotBuy": return `${detail.coin} ${(detail.units / 10_000).toFixed(4)}개 매수 · 가격 ${(detail.price / 100).toFixed(2)} · 수수료 ${detail.fee}`;
     case "spotSell": return `${detail.coin} ${(detail.units / 10_000).toFixed(4)}개 매도 · 가격 ${(detail.price / 100).toFixed(2)} · 손익 ${detail.payout - detail.costOut}${detail.levy ? ` · 환전가 특별 징수 ${detail.levy}` : ""}`;

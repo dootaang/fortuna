@@ -267,6 +267,8 @@ function MarketEditor({ market }: { market: MarketConfig }) {
           <Toggle label="NPC 거래자 (주민 군중)" checked={draft.npc.enabled} onChange={(enabled) => set({ npc: { ...draft.npc, enabled } })} hint="가상 포지션 묶음. 코인은 오가지 않고, 롱/숏·청산 지도·거래량에 섞여 보입니다." />
           <NumberField label="군중 규모 ×" value={draft.npc.scale} step={0.1} onChange={(scale) => set({ npc: { ...draft.npc, scale } })} min={0} max={5} />
           <Toggle label="구역 실적·리포트" checked={draft.earnings} onChange={(earnings) => set({ earnings })} hint="매일 21시 실적 발표, 다음 날 정오 리포트. 끄면 기준가 배율은 그대로 멈춥니다." />
+          <Toggle label="펀딩비" checked={draft.funding} onChange={(funding) => set({ funding })} hint="매 정시, 쏠린 쪽이 시간당 최대 0.1%를 내고 반대쪽이 받습니다." />
+          <Toggle label="청산 연쇄" checked={draft.cascade} onChange={(cascade) => set({ cascade })} hint="주민 군중이 강제 청산되면 같은 틱에 가격이 그쪽으로 한 번 더 밀립니다(최대 0.5%)." />
           <Toggle label="숨은 국면" checked={draft.regimes} onChange={(regimes) => set({ regimes })} hint="횡보·상승장·하락장·공포·알트 시즌. 끄면 늘 횡보입니다." />
           <Toggle label="자동 뉴스" checked={draft.autoNews} onChange={(autoNews) => set({ autoNews })} hint="종목마다 하루 3건쯤: 공식(늘 사실) · 신문(80%) · 골목 소문(60%). 종목별로도 끌 수 있습니다." />
         </div>

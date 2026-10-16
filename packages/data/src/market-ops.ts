@@ -64,6 +64,7 @@ export async function openPosition(session: PlayerSession, request: OpenRequest)
       playerId: session.pid, coin: quote.coin, side: quote.side, leverage: quote.leverage, margin: quote.margin, fee: quote.fee,
       entry: quote.entry, entrySeq: tick.seq, openedAt: serverTimestamp() as unknown as Timestamp, liq: quote.liq, cap: quote.cap,
       status: "open", exit: null, exitSeq: null, exitAt: null, outcome: null, payout: null, lastLedger: positionId,
+      F0: tick.st.coins[request.coin].F ?? 0,
     });
     return { positionId, quote };
   });
@@ -88,14 +89,16 @@ export async function closePosition(session: PlayerSession, positionId: string, 
     if (!position || position.playerId !== session.pid) throw new FortunaError("no-position", "포지션을 찾을 수 없습니다.");
     const kind = KIND_BY_STATUS[position.status];
     if (!kind) throw new FortunaError("settled", "이미 정산된 포지션입니다.");
-    const terms = { coin: position.coin, side: position.side, leverage: position.leverage, margin: position.margin, fee: position.fee, entry: position.entry, openedAtMs: position.openedAt.toMillis() };
+    const terms = { coin: position.coin, side: position.side, leverage: position.leverage, margin: position.margin, fee: position.fee, entry: position.entry, openedAtMs: position.openedAt.toMillis(), F0: position.F0 ?? null };
     let hour: number | null = null, seq: number | null = null, exit = position.exit ?? position.entry, closedAtMs = position.exitAt?.toMillis() ?? session.clock.now();
+    let fundingIndex: number | null = position.exitF ?? position.F0 ?? null;
     if (kind === "close") {
       const latest = await readLatestTick(tx, db, session.clock.now());
       requireFresh(latest.tick, market, session.clock.now());
       hour = latest.hour; seq = latest.tick.seq; exit = latest.tick.p[position.coin]; closedAtMs = session.clock.now();
+      fundingIndex = latest.tick.st.coins[position.coin].F ?? 0;
     }
-    const quote = quoteClose(market, terms, kind, exit, closedAtMs);
+    const quote = quoteClose(market, terms, kind, exit, closedAtMs, fundingIndex);
     const week = weeklyLevy(wallet.marketWeek, weekIndexAt(session.clock.now()), quote.payout - (position.margin + position.fee), market.weeklyProfitCap);
     const paid = quote.payout - week.levy;
     const before = counters(wallet), net = paid - position.margin;
@@ -104,7 +107,7 @@ export async function closePosition(session: PlayerSession, positionId: string, 
       type: "marketClose", actor: "player", delta: paid, vaultDelta: -paid,
       detail: {
         positionId, coin: position.coin, side: position.side, leverage: position.leverage, margin: position.margin, kind,
-        exit: quote.exit, hour, seq, hours: quote.hours, pnl: quote.pnl, interest: quote.interest, fee: quote.fee, payout: quote.payout, levy: week.levy,
+        exit: quote.exit, hour, seq, hours: quote.hours, pnl: quote.pnl, interest: quote.interest, fee: quote.fee, funding: quote.funding, payout: quote.payout, levy: week.levy,
       },
       wallet: { market: { ...before, open: before.open - 1 }, marketWeek: week.after },
       ...(notify ? { event: { kind: net > 0 ? ("marketWin" as const) : ("marketLoss" as const) } } : {}),

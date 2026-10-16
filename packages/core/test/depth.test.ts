@@ -20,9 +20,10 @@ function run(state: MarketState, ticks: number, startMs: number, config: Paramet
 }
 
 describe("crowd", () => {
-  it("does not change the price path", () => {
+  it("does not change the price path (apart from cascades)", () => {
     const start = Date.UTC(2026, 9, 12, 3, 0), base = initialMarketState(tickSeq(start, TICK), start);
-    const withCrowd = run(base, 400, start).state, without = run(base, 400, start, { ...DEFAULT_MARKET, npc: { enabled: false, scale: 1 } }).state;
+    // (Cascades are the crowd's one deliberate effect on prices; off here.)
+    const withCrowd = run(base, 400, start, { ...DEFAULT_MARKET, cascade: false }).state, without = run(base, 400, start, { ...DEFAULT_MARKET, cascade: false, npc: { enabled: false, scale: 1 } }).state;
     for (const id of COIN_IDS) expect(withCrowd.coins[id].p).toBe(without.coins[id].p);
     expect(without.coins.FTN.npc).toBeUndefined();
     expect(withCrowd.coins.FTN.npc!.oi).toBeGreaterThan(0);
@@ -235,7 +236,7 @@ describe("balance (원칙 4)", () => {
 describe("automatic news balance (3단계, 원칙 4)", () => {
   it("lets no simple news strategy beat 103%, at high leverage or none", async () => {
     const { quoteClose, tradeFee } = await import("../src/index.ts");
-    const start = Date.UTC(2026, 9, 11, 15, 0), tick = 30, days = 120;
+    const start = Date.UTC(2026, 9, 11, 15, 0), tick = 60, days = 240;
     let state = initialMarketState(tickSeq(start, tick), start);
     type Bet = { name: string; coin: CoinId; side: "long" | "short"; lev: number; entry: number; openedAtMs: number; closeAt: number; fee: number };
     const open: Bet[] = [], paid: Record<string, number> = {}, cost: Record<string, number> = {}, count: Record<string, number> = {};
@@ -312,4 +313,40 @@ describe("hidden regime (4단계)", () => {
     const ratios = Object.fromEntries(Object.keys(paid).map((name) => [name, Math.round((paid[name]! / cost[name]!) * 1_000) / 10]));
     for (const [name, ratio] of Object.entries(ratios)) expect(ratio, `${name} ${JSON.stringify(ratios)}`).toBeLessThan(103);
   }, 300_000);
+});
+
+describe("funding and cascades (5단계)", () => {
+  it("charges the crowded side, nothing when balanced, within ±0.1% an hour", async () => {
+    const { fundingRate, fundingPpm, fundingFor, addFunding, fundingDue, quoteClose } = await import("../src/index.ts");
+    expect(fundingRate(10_000, 10_000)).toBe(0);
+    expect(fundingRate(30_000, 10_000)).toBeGreaterThan(0);
+    expect(fundingRate(0, 1e9)).toBeCloseTo(-0.0005);
+    expect(fundingPpm(1e9, 0)).toBeLessThanOrEqual(1_000);
+    expect(fundingFor(2_000, "long", 0, 1_000)).toBe(2);
+    expect(fundingFor(2_000, "short", 0, 1_000)).toBe(-2);
+    expect(fundingFor(2_000, "long", null, 1_000)).toBe(0);
+    expect(fundingDue(Date.UTC(2026, 9, 1, 3, 59, 50), Date.UTC(2026, 9, 1, 4, 0, 0))).toBe(true);
+    const book = Object.fromEntries(COIN_IDS.map((id) => [id, [20_000, 10_000]])) as Record<CoinId, [number, number]>;
+    expect(addFunding({ FTN: 100 }, book).FTN).toBe(100 + fundingPpm(20_000, 10_000));
+    // A long pays it at settlement, a short receives it.
+    const terms = { coin: "FTN" as CoinId, leverage: 5, margin: 200, fee: 1, entry: 100_000, openedAtMs: 0, F0: 0 };
+    const long = quoteClose(DEFAULT_MARKET, { ...terms, side: "long" }, "close", 100_000, 1_000, 2_000);
+    const short = quoteClose(DEFAULT_MARKET, { ...terms, side: "short" }, "close", 100_000, 1_000, 2_000);
+    expect(long.funding).toBe(2);
+    expect(short.funding).toBe(-2);
+    expect(short.payout - long.payout).toBe(4);
+  });
+
+  it("cascades only from crowd liquidations, once, at most 0.5%", async () => {
+    const { cascadeMove, liquidateCrowd, CASCADE_MAX } = await import("../src/index.ts");
+    expect(cascadeMove({ liquidatedLong: 0, liquidatedShort: 0 })).toBe(0);
+    expect(cascadeMove({ liquidatedLong: 4_000, liquidatedShort: 0 })).toBeLessThan(0);
+    expect(cascadeMove({ liquidatedLong: 0, liquidatedShort: 1e9 })).toBe(CASCADE_MAX);
+    // The push itself only removes what it liquidates; the crowd does not refill or turn.
+    const crowd = { oi: 10_000, lr: 0.5, px: 10_000 };
+    const after = liquidateCrowd(crowd, 9_500, 9_450);
+    expect(after.crowd.px).toBe(10_000);
+    expect(after.crowd.oi).toBeLessThanOrEqual(10_000);
+    // Player positions never enter cascadeMove: it takes the crowd's step only (see engine).
+  });
 });

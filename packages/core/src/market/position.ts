@@ -83,6 +83,8 @@ export interface PositionTerms {
   fee: number;
   entry: number;
   openedAtMs: number;
+  /** Funding index (ppm) when opened; missing on positions from before funding = no funding. */
+  F0?: number | null | undefined;
 }
 
 export type CloseKind = "close" | "cap" | "liquidated" | "refund";
@@ -94,24 +96,33 @@ export interface CloseQuote {
   pnl: number;
   interest: number;
   fee: number;
+  /** Funding paid (positive) or received (negative) since opening. */
+  funding: number;
   payout: number;
+}
+
+/** Funding a position owes for the index moving from F0 to F: longs pay a positive move, shorts receive it. */
+export function fundingFor(notional: number, side: Side, F0: number | null | undefined, F: number | null | undefined): number {
+  if (F0 === null || F0 === undefined || F === null || F === undefined) return 0;
+  return floorDiv(notional * (F - F0) * (side === "long" ? 1 : -1), 1_000_000);
 }
 
 /**
  * Settlement. `close` and `cap` pay margin + pnl − interest − closing fee (= the opening fee; doubled for MWL at night) (never below 0, profit
  * capped at margin × capMultiple); `liquidated` pays nothing; `refund` (dealer void) returns the margin.
  */
-export function quoteClose(config: MarketConfig, position: PositionTerms, kind: CloseKind, exit: number, closedAtMs: number): CloseQuote {
+export function quoteClose(config: MarketConfig, position: PositionTerms, kind: CloseKind, exit: number, closedAtMs: number, fundingIndex?: number | null): CloseQuote {
   const notional = position.margin * position.leverage;
-  if (kind === "liquidated") return { kind, exit, hours: 0, pnl: -position.margin, interest: 0, fee: 0, payout: 0 };
-  if (kind === "refund") return { kind, exit: position.entry, hours: 0, pnl: 0, interest: 0, fee: 0, payout: position.margin };
+  if (kind === "liquidated") return { kind, exit, hours: 0, pnl: -position.margin, interest: 0, fee: 0, funding: 0, payout: 0 };
+  if (kind === "refund") return { kind, exit: position.entry, hours: 0, pnl: 0, interest: 0, fee: 0, funding: 0, payout: position.margin };
   const hours = heldHours(position.openedAtMs, closedAtMs);
   const pnl = pnlAt(notional, position.entry, exit, position.side);
   const interest = interestFor(notional - position.margin, hours, config.interestBps);
   const night = position.coin === "MWL" && isMoonlessNight(closedAtMs);
   const fee = position.fee * (night ? config.nightFeeMultiplier : 1);
-  const payout = Math.max(0, position.margin + Math.min(pnl, position.margin * config.capMultiple) - interest - fee);
-  return { kind, exit, hours, pnl, interest, fee, payout };
+  const funding = fundingFor(notional, position.side, position.F0, fundingIndex);
+  const payout = Math.max(0, position.margin + Math.min(pnl, position.margin * config.capMultiple) - interest - fee - funding);
+  return { kind, exit, hours, pnl, interest, fee, funding, payout };
 }
 
 /** Whether a price ends the position on its own (checked by the price recorder every tick). */
@@ -126,13 +137,14 @@ export function triggerAt(position: { side: Side; liq: number; cap: number }, pr
   return null;
 }
 
-/** Live equity for display: margin + pnl − interest so far. */
-export function liveEquity(config: MarketConfig, position: PositionTerms, price: number, nowMs: number): { pnl: number; interest: number; equity: number; ratio: number } {
+/** Live equity for display: margin + pnl − interest − funding so far. */
+export function liveEquity(config: MarketConfig, position: PositionTerms, price: number, nowMs: number, fundingIndex?: number | null): { pnl: number; interest: number; funding: number; equity: number; ratio: number } {
   const notional = position.margin * position.leverage;
   const pnl = pnlAt(notional, position.entry, price, position.side);
   const interest = interestFor(notional - position.margin, heldHours(position.openedAtMs, nowMs), config.interestBps);
-  const equity = position.margin + pnl - interest;
-  return { pnl, interest, equity, ratio: pnl / position.margin };
+  const funding = fundingFor(notional, position.side, position.F0, fundingIndex);
+  const equity = position.margin + pnl - interest - funding;
+  return { pnl, interest, funding, equity, ratio: pnl / position.margin };
 }
 
 // ── 환전가 특별 징수 (docs/SPEC-MARKET-DEPTH.md 6-5) ──

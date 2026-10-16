@@ -1,5 +1,5 @@
 import {
-  REGIME_ORDER_TEXT, isRegimeKind, type Regime,
+  REGIME_ORDER_TEXT, addFunding, fundingDue, isRegimeKind, type Regime,
   ANALYSTS, COIN_IDS, activityRatio, analystBand, anchorOf, buildStructure, coinForDistrict, debtFactor, fundamentalsInput, playerShare, reportAt, reportSeedKey, weekIndexAt, weekStartMs, foldCandle, heatFactor, hourDocId, hourIndexAt, initialMarketState, isCoinId, marketSeed, minuteKey, normalizeMarket, normalizeNotify,
   seedKeys, stateFromTick, stepMarket, tickFromState, tickSeq, triggerAt,
   type Candle, type CoinId, type OpenLot, type FeedItem, type MarketConfig, type MarketState, type NewsShock, type NewsSize, type TickDoc, type WorldInput,
@@ -88,7 +88,9 @@ export async function observeWorld(fs: FirestoreRest, atMs: number): Promise<Wor
     const counts = await Promise.all(residents.map(async (player) => {
       const [work, repay, skill] = await Promise.all([
         fs.aggregate("ledger", { playerId: player.id, type: "work" }, "at", since, { count: true }),
-        fs.aggregate("ledger", { playerId: player.id, type: "repay" }, "at", since, { sum: "detail.amount" }),
+        // Repayments are few; read them rather than sum (a sum aggregation needs its own index).
+        fs.query("ledger", { playerId: player.id, type: "repay" }, 300)
+          .then((rows) => rows.filter((row) => toMs(row.data.at) >= since).reduce((sum, row) => sum + Number((row.data.detail as { amount?: unknown } | undefined)?.amount ?? 0), 0)),
         fs.aggregate("ledger", { playerId: player.id, type: "skill" }, "at", since, { count: true }),
       ]);
       return { coin: coinForDistrict(String(player.data.districtId ?? "")), work, repay, skill };
@@ -208,7 +210,13 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
   const hour = hourIndexAt(atMs), minute = minuteKey(atMs);
   const previous = recorder.hour === hour && recorder.minute === minute ? recorder.candle : null;
   const candle = Object.fromEntries(COIN_IDS.map((id) => [id, foldCandle(previous?.[id], state.coins[id].p, Math.round(volume[id]))])) as Record<CoinId, Candle>;
-  const last = { ...tickFromState(state, new Stamp(atMs)), fx: buildStructure(state, lots, (coin) => config.coins[coin]?.volMult ?? 1) };
+  const fx = buildStructure(state, lots, (coin) => config.coins[coin]?.volMult ?? 1);
+  // 5단계 펀딩: at each full hour every coin's index moves by the hour's rate from the book (crowd + players).
+  if (config.funding && fundingDue(base.atMs, atMs)) {
+    const index = addFunding(Object.fromEntries(COIN_IDS.map((coin) => [coin, state.coins[coin].F ?? 0])), fx.ls);
+    for (const coin of COIN_IDS) state.coins[coin] = { ...state.coins[coin], F: index[coin] };
+  }
+  const last = { ...tickFromState(state, new Stamp(atMs)), fx };
   const sameDoc = recorder.hour === hour && recorder.hourUpdateTime !== null;
   const writes: Write[] = [
     sameDoc
@@ -246,8 +254,8 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
       },
     }] : []),
     ...ends.map(({ doc, status, exit }) => ({
-      update: { name: doc.name, fields: encodeFields({ status, exit, exitSeq: seq, exitAt: new Stamp(atMs) }) },
-      updateMask: { fieldPaths: ["status", "exit", "exitSeq", "exitAt"] }, currentDocument: { updateTime: doc.updateTime },
+      update: { name: doc.name, fields: encodeFields({ status, exit, exitSeq: seq, exitAt: new Stamp(atMs), exitF: isCoinId(doc.data.coin) ? state.coins[doc.data.coin].F ?? 0 : 0 }) },
+      updateMask: { fieldPaths: ["status", "exit", "exitSeq", "exitAt", "exitF"] }, currentDocument: { updateTime: doc.updateTime },
     })),
   ];
   try {

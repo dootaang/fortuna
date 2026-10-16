@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import { ANALYSTS, COINS, consensus, earningsIndex, entryPaused, isCoinId, leverageChoices, maxLeverage, moodWords, nextEarnings, quoteOpen, type CoinId, type MarketConfig, type OpenQuote, type Side } from "@fortuna/core";
+import { ANALYSTS, COINS, consensus, fundingRate, nextFundingAt, earningsIndex, entryPaused, isCoinId, leverageChoices, maxLeverage, moodWords, nextEarnings, quoteOpen, type CoinId, type MarketConfig, type OpenQuote, type Side } from "@fortuna/core";
 import { openPosition } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
@@ -130,6 +130,16 @@ function CoinView({ coin }: { coin: CoinId }) {
               <span className="text-[#f2b3aa]">숏 {fx.ls[coin][1].toLocaleString("ko-KR")}</span>
             </div>
             <LongShortBar ls={fx.ls[coin]} />
+            {market.funding && (() => {
+              const rate = fundingRate(fx.ls[coin][0], fx.ls[coin][1]);
+              const left = Math.max(0, Math.ceil((nextFundingAt(now()) - now()) / 60_000));
+              return (
+                <p className="mt-1 text-xs text-mist" title="매 정시에 롱·숏 쏠림만큼 펀딩을 주고받습니다. 많은 쪽이 내고 적은 쪽이 받습니다(상대는 지배인 금고).">
+                  펀딩률 <b className={cx("num", rate > 0 ? "text-[#f2b3aa]" : rate < 0 ? "text-[#a9ecc9]" : "text-ivory")}>{rate >= 0 ? "+" : ""}{(rate * 100).toFixed(3)}%</b>/시간
+                  · {rate > 0 ? "롱이 내고 숏이 받음" : rate < 0 ? "숏이 내고 롱이 받음" : "주고받을 것 없음"} · 다음 정산 {left}분 뒤
+                </p>
+              );
+            })()}
           </div>
           <LiquidationMap lm={fx.lm[coin]} price={priceText(price)} />
         </Frame>

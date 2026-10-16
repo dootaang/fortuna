@@ -26,7 +26,7 @@ export function PositionCard({ row, tick, market, compact }: { row: Row<Position
   const position = row.data, def = COINS[position.coin];
   const price = tick?.p[position.coin] ?? position.entry;
   const openedAtMs = position.openedAt?.toMillis?.() ?? session.clock.now();
-  const live = liveEquity(market, { ...position, openedAtMs }, price, session.clock.now());
+  const live = liveEquity(market, { ...position, openedAtMs, F0: position.F0 ?? null }, price, session.clock.now(), tick?.st.coins[position.coin].F ?? null);
   const ended = position.status !== "open";
   // 0 at the liquidation line, 1 at entry or better.
   const distance = Math.max(0, Math.min(1, position.side === "long" ? (price - position.liq) / (position.entry - position.liq) : (position.liq - price) / (position.liq - position.entry)));
@@ -76,7 +76,7 @@ export function PositionCard({ row, tick, market, compact }: { row: Row<Position
           </div>
           {!compact && (
             <div className="mt-3 flex items-center justify-between gap-2 text-xs text-mist">
-              <span>현재 <span className="num text-ivory">{priceText(price)}</span> · 이자 <span className="num">{live.interest}</span>코인 · 정산 예상 <Coins value={Math.max(0, live.equity - position.fee)} /></span>
+              <span>현재 <span className="num text-ivory">{priceText(price)}</span> · 이자 <span className="num">{live.interest}</span>코인{live.funding ? <> · 펀딩 <span className={cx("num", live.funding > 0 ? "text-[#f2b3aa]" : "text-[#a9ecc9]")}>{live.funding > 0 ? `−${live.funding}` : `+${-live.funding}`}</span></> : null} · 정산 예상 <Coins value={Math.max(0, live.equity - position.fee)} /></span>
               <button type="button" className="btn btn-ghost btn-sm" disabled={busy || closing} onClick={() => void close()}>{closing ? "정산 중…" : "청산"}</button>
             </div>
           )}

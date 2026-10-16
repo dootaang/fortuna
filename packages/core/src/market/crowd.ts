@@ -53,8 +53,10 @@ function normal(rng: XorShift32): number {
 
 export interface CrowdStep {
   crowd: Crowd;
-  /** Notional the move liquidated, coins. */
+  /** Notional the move liquidated, coins (longs and shorts separately too). */
   liquidated: number;
+  liquidatedLong: number;
+  liquidatedShort: number;
   /** Notional that changed hands (entries, exits, liquidations), coins: the virtual volume. */
   flow: number;
 }
@@ -65,14 +67,14 @@ export interface CrowdStep {
  * toward its usual size (larger when the market is wild).
  */
 export function stepCrowd(crowd: Crowd, coin: CoinId, prevPrice: number, price: number, hours: number, z: number, wild: number, scale: number, rng: XorShift32, volScale = 1): CrowdStep {
-  let long = crowd.oi * crowd.lr, short = crowd.oi * (1 - crowd.lr), liquidated = 0;
+  let long = crowd.oi * crowd.lr, short = crowd.oi * (1 - crowd.lr), liquidated = 0, liquidatedLong = 0, liquidatedShort = 0;
   for (const { lev, w } of CROWD_LEVERAGE) {
     for (const side of ["long", "short"] as const) {
       const before = goneFraction(side, crowd.px, lev, prevPrice, volScale), after = goneFraction(side, crowd.px, lev, price, volScale);
       if (after <= before || before >= 1) continue;
       const share = w * ((after - before) / (1 - before));
-      if (side === "long") { const cut = long * share; long -= cut; liquidated += cut; }
-      else { const cut = short * share; short -= cut; liquidated += cut; }
+      if (side === "long") { const cut = long * share; long -= cut; liquidated += cut; liquidatedLong += cut; }
+      else { const cut = short * share; short -= cut; liquidated += cut; liquidatedShort += cut; }
     }
   }
   const oi0 = long + short;
@@ -87,7 +89,37 @@ export function stepCrowd(crowd: Crowd, coin: CoinId, prevPrice: number, price: 
   lr = Math.min(0.8, Math.max(0.2, lr));
   const churn = oi * (6 / 24) * hours * (1 + Math.min(3, Math.abs(z)));
   const px = crowd.px + (price - crowd.px) * (1 - Math.exp(-hours / 2));
-  return { crowd: { oi: Math.round(oi), lr: Math.round(lr * 1_000) / 1_000, px: Math.round(px) }, liquidated, flow: churn + Math.abs(refill) + liquidated };
+  return { crowd: { oi: Math.round(oi), lr: Math.round(lr * 1_000) / 1_000, px: Math.round(px) }, liquidated, liquidatedLong, liquidatedShort, flow: churn + Math.abs(refill) + liquidated };
+}
+
+/**
+ * 5단계 청산 연쇄 (6-2): the crowd's forced closes push the price once more the same way (at most 3%), in the same
+ * tick so nobody can see it coming from the public tick. Only crowd liquidations count (a player cannot push the
+ * price with their own position), and the extra move liquidates more of the crowd without cascading again.
+ */
+/** Cascade size: at most CASCADE_MAX, CASCADE_PER_2000 per 2,000 coins of crowd liquidations (see SPEC 16절 for why smaller than 6-2). */
+export const CASCADE_MAX = 0.005;
+export const CASCADE_PER_2000 = 0.0025;
+
+export function cascadeMove(step: Pick<CrowdStep, "liquidatedLong" | "liquidatedShort">): number {
+  const net = step.liquidatedLong - step.liquidatedShort;
+  if (Math.abs(net) < 1) return 0;
+  return (net > 0 ? -1 : 1) * Math.min(CASCADE_MAX, (CASCADE_PER_2000 * Math.abs(net)) / 2_000);
+}
+
+/** Remove what a price move from `from` to `to` liquidates, nothing else (used after a cascade). */
+export function liquidateCrowd(crowd: Crowd, from: number, to: number, volScale = 1): { crowd: Crowd; liquidated: number } {
+  let long = crowd.oi * crowd.lr, short = crowd.oi * (1 - crowd.lr), liquidated = 0;
+  for (const { lev, w } of CROWD_LEVERAGE) {
+    for (const side of ["long", "short"] as const) {
+      const before = goneFraction(side, crowd.px, lev, from, volScale), after = goneFraction(side, crowd.px, lev, to, volScale);
+      if (after <= before || before >= 1) continue;
+      const share = w * ((after - before) / (1 - before));
+      if (side === "long") { const cut = long * share; long -= cut; liquidated += cut; } else { const cut = short * share; short -= cut; liquidated += cut; }
+    }
+  }
+  const oi = long + short;
+  return { crowd: { oi: Math.round(oi), lr: oi > 0 ? Math.round((long / oi) * 1_000) / 1_000 : crowd.lr, px: crowd.px }, liquidated };
 }
 
 // ── 보이는 시장 구조 ──
