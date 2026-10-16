@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { getDoc, limit, orderBy, query, where, type Timestamp } from "firebase/firestore";
 import { LEDGER_LABELS, TEXT, usesLeft, type LedgerEntry } from "@fortuna/core";
-import { depositJoint, friendlyError, refs, repayDebt, useItem, type InventoryDoc } from "@fortuna/data";
+import { cityRefs, depositJoint, friendlyError, refs, repayDebt, repayFor, useItem, type InventoryDoc } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { useLiveQuery, type Row } from "../session/live.ts";
 import { Coins, Empty, Frame, Modal, NumberField, PageTitle, Stat, cx, formatDate, useAction } from "../ui/kit.tsx";
@@ -25,6 +25,7 @@ export default function WalletPage() {
       </Frame>
       <HoldingsList />
       <Repay />
+      <RepayFriends />
       <JointWallet />
       <FundsSection />
       <Inventory />
@@ -49,6 +50,43 @@ function Repay() {
       </div>
       <button type="button" className="btn btn-gold mt-3 w-full" disabled={busy || !Number.isInteger(amount) || amount <= 0 || amount > max}
         onClick={() => { const clears = amount === wallet.debt; void run(() => repayDebt(session, amount), clears ? TEXT.repay.cleared : TEXT.repay.done).then((id) => { if (clears) relay(notify.relayUrl, id); }); }}>상환</button>
+    </Frame>
+  );
+}
+
+/** 동료 빚 대신 갚기: 내 코인이 금고로 가고 그 사람의 빚이 준다. */
+function RepayFriends() {
+  const { wallet, session } = usePlayer();
+  const { busy, run } = useAction();
+  const debtors = useLiveQuery(query(refs.wallets(session.db), where("debt", ">", 0)), "wallet:debtors");
+  const actors = useLiveQuery(cityRefs.actors(session.db), "wallet:actors");
+  const names = useMemo(() => new Map((actors.status === "ready" ? actors.data : []).map((row) => [row.id, row.data.name])), [actors]);
+  const others = (debtors.status === "ready" ? debtors.data : []).filter((row) => row.id !== session.pid && row.data.arrived);
+  const [to, setTo] = useState("");
+  const [amount, setAmount] = useState(100);
+  if (!others.length) return null;
+  const target = others.find((row) => row.id === to) ?? others[0]!;
+  const max = Math.min(target.data.debt, wallet.balance);
+  return (
+    <Frame>
+      <h2 className="deco-title text-lg">동료 빚 대신 갚기</h2>
+      <p className="text-sm text-mist">내 코인으로 동료의 빚을 줄입니다. 갚은 코인은 지배인 금고로 갑니다.</p>
+      <ul className="mt-2 space-y-1 text-sm">
+        {others.map((row) => (
+          <li key={row.id}>
+            <label className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2"><input type="radio" name="friend-debt" checked={target.id === row.id} onChange={() => setTo(row.id)} />{names.get(row.id) ?? "이름 없는 승객"}</span>
+              <span>남은 빚 <Coins value={row.data.debt} /></span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 flex items-end gap-2">
+        <div className="flex-1"><NumberField label="대신 갚을 금액" value={amount} onChange={setAmount} min={1} max={max} /></div>
+        <button type="button" className="btn btn-ghost" onClick={() => setAmount(max)}>전액</button>
+      </div>
+      <button type="button" className="btn btn-gold mt-3 w-full" disabled={busy || !Number.isInteger(amount) || amount <= 0 || amount > max}
+        onClick={() => void run(() => repayFor(session, target.id, amount), `${names.get(target.id) ?? "동료"}의 빚을 ${amount.toLocaleString("ko-KR")}코인 갚았습니다.`)}>대신 갚기</button>
     </Frame>
   );
 }

@@ -54,6 +54,8 @@ export interface FundDoc {
   visible: boolean;
   sortOrder: number;
   lastLedger: string;
+  /** District whose residents' debt this fund pays off (a ledger page turns blank when it is full). */
+  book?: string | null;
 }
 
 export interface InventoryDoc {

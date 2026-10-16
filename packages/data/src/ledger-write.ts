@@ -19,7 +19,7 @@ export interface PlayerSession extends Session { pid: string; }
 
 export interface EntrySpec {
   type: LedgerType;
-  actor: "player" | "admin";
+  actor: "player" | "admin" | "friend";
   memo?: string;
   delta: number;
   debtDelta?: number;

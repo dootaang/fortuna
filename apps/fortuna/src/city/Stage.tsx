@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { STATIONS, type PlaceId } from "@fortuna/core";
-import { sessionLog, type ContestDoc } from "@fortuna/data";
+import { sessionLog, winsNeeded } from "@fortuna/data";
 import { db } from "../firebase.ts";
 import { cx, formatDate, useAction } from "../ui/kit.tsx";
 import { MessageItem, channelLabel, type ChatIdentity } from "./Chat.tsx";
 import { ActorFace, NpcFace } from "./SceneCard.tsx";
-import { AWAY_MS, SPEAKING_MS, useContestEntries, useLookups, usePinned, useSessions, type ActorRow, type MessageRow } from "./useCity.ts";
+import { AWAY_MS, SPEAKING_MS, useContestEntries, useLookups, usePinned, useSessions, type ActorRow, type MessageRow, type OpenContest } from "./useCity.ts";
 
 /** 장면 아래 "여기 있는 사람" 줄: 캐릭터 얼굴, 무대 위 NPC, 방금 말한 사람은 금테. */
 export function Presence({ here, npcIds, recent, nowMs, meId }: { here: ActorRow[]; npcIds: string[]; recent: MessageRow[]; nowMs: number; meId: string | null }) {
@@ -32,9 +32,18 @@ export function Presence({ here, npcIds, recent, nowMs, meId }: { here: ActorRow
   );
 }
 
-/** 맞붙기: 딜러가 연 대결에 이 장소에서 쓴 특기 결제가 점수로 쌓인다. */
-export function ContestPanel({ contest, controls }: { contest: ContestDoc & { id: string }; controls?: React.ReactNode }) {
-  const entries = useContestEntries(contest.id);
+/** This round's best skill score (간부전), or every entry (맞붙기). */
+export function roundEntries(contest: OpenContest, entries: MessageRow[]): MessageRow[] {
+  if (!contest.mode || contest.mode === "simple") return entries;
+  const since = contest.roundStartedAt?.toMillis?.() ?? 0;
+  return entries.filter((row) => row.atMs >= since);
+}
+
+/** 맞붙기: 딜러가 연 대결에 이 장소에서 쓴 특기 결제가 점수로 쌓인다. 간부전·최종전은 라운드제로 보인다. */
+export function ContestPanel({ contest, controls }: { contest: OpenContest; controls?: React.ReactNode }) {
+  const all = useContestEntries(contest.id);
+  if (contest.mode === "boss" || contest.mode === "final") return <FightPanel contest={contest} entries={roundEntries(contest, all)} controls={controls} />;
+  const entries = all;
   return (
     <section className="shrink-0 border-t border-gold-400/25 bg-ink/70 px-3 py-2" aria-label="맞붙기">
       <div className="flex items-baseline justify-between gap-2">
@@ -51,6 +60,35 @@ export function ContestPanel({ contest, controls }: { contest: ContestDoc & { id
           ))}
         </ol>
       ) : <p className="mt-1 text-xs text-mist">아직 아무도 나서지 않았다. ⚡ › 특기 쓰기로 겨루세요.</p>}
+      {controls}
+    </section>
+  );
+}
+
+function FightPanel({ contest, entries, controls }: { contest: OpenContest; entries: MessageRow[]; controls?: React.ReactNode }) {
+  const best = entries[0]?.data.skill?.used ?? 0, party = best + (contest.bonus ?? 0), boss = contest.bossScore;
+  const final = contest.mode === "final", pages = contest.pages ?? [], left = pages.length - (contest.pageIndex ?? 0);
+  const need = winsNeeded(contest.rounds ?? 3), assists = (contest.assists ?? []).filter((card) => !card.used);
+  return (
+    <section className="shrink-0 border-t border-[#c4473a]/40 bg-ink/80 px-3 py-2" aria-label={final ? "최종전" : "간부전"}>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-sm"><span className="deco-caps mr-1 text-[0.6rem] text-[#f2b3aa]">{final ? "최종전" : "간부전"}</span><b className="text-gold-200">{contest.title}</b></p>
+        <p className="text-xs text-mist">제{contest.round ?? 1}판 · {contest.wins?.party ?? 0}:{contest.wins?.boss ?? 0} (먼저 {need}승)</p>
+      </div>
+      <div className="mt-1 grid grid-cols-2 gap-2 text-center">
+        <div className="rounded-sm border border-gold-400/30 py-1">
+          <p className="text-[0.65rem] text-mist">우리 편{contest.bonus ? ` (조력 +${contest.bonus})` : ""}</p>
+          <p className={cx("text-xl font-bold", party > boss ? "text-[#9fe0b4]" : "text-ivory")}>{party}</p>
+          <p className="truncate text-[0.65rem] text-mist">{entries[0] ? `${entries[0].data.authorName} · ${entries[0].data.skill!.name}` : "아직 아무도"}</p>
+        </div>
+        <div className="rounded-sm border border-[#c4473a]/40 py-1">
+          <p className="text-[0.65rem] text-mist">{contest.bossName}</p>
+          <p className={cx("text-xl font-bold", boss >= party ? "text-[#f2b3aa]" : "text-ivory")}>{boss}</p>
+          <p className="text-[0.65rem] text-mist">{final ? `남은 장부 ${left}쪽` : `금고 ${(contest.bossVault ?? 0).toLocaleString("ko-KR")}`}{contest.fizzle ? ` · 불발 ${contest.fizzle}` : ""}</p>
+        </div>
+      </div>
+      {final && assists.length > 0 && <p className="mt-1 text-[0.7rem] text-gold-200">조력 카드: {assists.map((card) => card.title).join(" · ")} — 쓰겠다고 말하면 딜러가 펼친다.</p>}
+      {(contest.log ?? []).length > 0 && <ol className="mt-1 max-h-20 space-y-0.5 overflow-y-auto text-[0.7rem] text-ivory/80">{(contest.log ?? []).slice(-4).map((line, index) => <li key={index}>{line}</li>)}</ol>}
       {controls}
     </section>
   );

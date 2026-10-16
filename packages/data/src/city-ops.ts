@@ -95,7 +95,7 @@ export interface ContestDoc {
   openedAt: Timestamp;
 }
 export interface ActivityDoc { lastAt: Timestamp; lastName: string; }
-export interface CityConfig { closedLines: LineId[]; }
+export interface CityConfig { closedLines: LineId[]; /** The ledger is shown to players only after the dealer reveals it. */ bookRevealed?: boolean; }
 
 export const MESSAGE_MAX = 2_000;
 export const GLOBAL_CHANNEL = "global";

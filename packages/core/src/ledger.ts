@@ -3,7 +3,7 @@ import type { GameId, Venue, WagerTrace } from "./games/types.ts";
 /** Firestore Timestamp without importing the SDK into the pure core. */
 export interface TimestampLike { toMillis(): number; }
 
-export const LEDGER_TYPES = ["arrival", "work", "betOpen", "betSettle", "skill", "repay", "jointDeposit", "fundContribution", "shop", "itemUse", "adminAdjust", "pvpStake", "pvpPayout", "marketOpen", "marketClose", "spotBuy", "spotSell", "dividend", "marketInfo"] as const;
+export const LEDGER_TYPES = ["arrival", "work", "betOpen", "betSettle", "skill", "repay", "jointDeposit", "fundContribution", "shop", "itemUse", "adminAdjust", "pvpStake", "pvpPayout", "marketOpen", "marketClose", "spotBuy", "spotSell", "dividend", "marketInfo", "repayFor", "repaidBy"] as const;
 export type LedgerType = (typeof LEDGER_TYPES)[number];
 
 export interface WagerStep<T = TimestampLike> { a: string; t: T; }
@@ -71,7 +71,8 @@ export interface LedgerEntry<T = TimestampLike> {
   balanceAfter: number;
   debtAfter: number;
   weekIndex: number;
-  actor: "player" | "admin";
+  /** "friend": a player wrote this entry for someone else (only repaidBy, paired with their repayFor). */
+  actor: "player" | "admin" | "friend";
   actorUid: string;
   memo: string;
   detail: Record<string, unknown>;
@@ -87,6 +88,8 @@ export const LEDGER_LABELS: Readonly<Record<LedgerType, string>> = {
   betSettle: "도박 정산",
   skill: "특기 결제",
   repay: "빚 상환",
+  repayFor: "동료 빚 대납",
+  repaidBy: "동료가 갚아 줌",
   jointDeposit: "공동 지갑",
   fundContribution: "모금함",
   shop: "상점 구매",
@@ -109,7 +112,7 @@ export const LEDGER_GROUPS: Readonly<Record<string, readonly LedgerType[]>> = {
   "특기 결제": ["skill"],
   "상점 구매": ["shop"],
   "물품 사용": ["itemUse"],
-  상환: ["repay"],
+  상환: ["repay", "repayFor", "repaidBy"],
   "공동·모금": ["jointDeposit", "fundContribution"],
   "관리자 조정": ["adminAdjust"],
   도착: ["arrival"],

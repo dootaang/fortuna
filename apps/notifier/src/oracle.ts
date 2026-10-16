@@ -1,7 +1,7 @@
 import {
   REGIME_ORDER_TEXT, buildStats, earningsAt, earningsSeedKey, infoAnswer, infoSeedKey, npcSurprise, addFunding, creditClaim, dividendFor, holdingValue, coinDistrictLiberated, fundingDue, isRegimeKind, type Regime,
   ANALYSTS, COIN_IDS, activityRatio, analystBand, anchorOf, buildStructure, coinForDistrict, debtFactor, fundamentalsInput, playerShare, reportAt, reportSeedKey, weekIndexAt, weekStartMs, foldCandle, heatFactor, hourDocId, hourIndexAt, initialMarketState, isCoinId, marketSeed, minuteKey, normalizeMarket, normalizeNotify,
-  seedKeys, stateFromTick, stepMarket, tickFromState, tickSeq, triggerAt,
+  seedKeys, stateFromTick, stepMarket, tickFromState, tickSeq, triggerAt, bookInputFrom, deriveBook,
   type Candle, type CoinId, type OpenLot, type FeedItem, type MarketConfig, type MarketState, type NewsShock, type NewsSize, type TickDoc, type WorldInput,
 } from "@fortuna/core";
 import { CommitConflict, FirestoreRest, Stamp, encode, encodeFields, type Doc, type Write } from "./firestore-rest.ts";
@@ -354,6 +354,19 @@ const FEED_TO_DISCORD = new Set(["news", "liberation", "houseOpen", "earnings", 
 const DISCORD_DAILY_MAX = 4;
 
 /** When the tick after `nowMs` is due (a little after the boundary, so its time is already past). */
+/** Recompute the ledger (same inputs and function as the dealer's app). */
+export async function writeBook(fs: FirestoreRest, atMs: number): Promise<void> {
+  const rows = (docs: Doc[]) => docs.map((entry) => ({ id: entry.id, data: entry.data }));
+  const [districts, clues, funds, fronts, players, wallets, titles] = await Promise.all([
+    fs.list("districts"), fs.query("clues", { kind: "collateral" }), fs.query("funds", { visible: true }), fs.list("fronts"),
+    fs.list("players"), fs.list("wallets"), fs.get("lore/bookTitles"),
+  ]);
+  const book = deriveBook(bookInputFrom({
+    districts: rows(districts), clues: rows(clues), funds: rows(funds), fronts: rows(fronts), players: rows(players), wallets: rows(wallets), titles: titles?.data ?? null,
+  }));
+  await fs.commit([{ update: { name: fs.name("book/main"), fields: encodeFields({ ...book, at: new Stamp(atMs) }) } }]);
+}
+
 export function nextTickAt(nowMs: number, tickMs: number): number { return (Math.floor(nowMs / tickMs) + 1) * tickMs + 300; }
 
 /**
@@ -372,13 +385,14 @@ export class TickRunner {
   private notify = normalizeNotify(undefined);
   private minuteChecked = -1;
   private worldChecked = -1;
+  private bookChecked = -1;
 
   constructor(private readonly env: RecorderEnv, private readonly post: typeof fetch = fetch) {}
 
   tickMs(): number { return (this.recorder?.config.tickSeconds ?? 15) * 1000; }
 
   /** Forget everything; the next call reloads from Firestore. */
-  reset(): void { this.recorder = null; this.minuteChecked = -1; this.worldChecked = -1; }
+  reset(): void { this.recorder = null; this.minuteChecked = -1; this.worldChecked = -1; this.bookChecked = -1; }
 
   /**
    * What survives the Durable Object being evicted between ticks (it usually is: 15 s of idle).
@@ -388,7 +402,7 @@ export class TickRunner {
     const { fs: _fs, secret: _secret, ...recorder } = this.recorder ?? ({} as Recorder);
     return {
       token: this.token, recorder: this.recorder ? recorder : null, news: this.news, events: this.events, regimes: this.regimes, notify: this.notify,
-      minuteChecked: this.minuteChecked, worldChecked: this.worldChecked, posted: this.posted,
+      minuteChecked: this.minuteChecked, worldChecked: this.worldChecked, bookChecked: this.bookChecked, posted: this.posted,
     };
   }
 
@@ -401,6 +415,7 @@ export class TickRunner {
     this.notify = snapshot.notify;
     this.minuteChecked = snapshot.minuteChecked;
     this.worldChecked = snapshot.worldChecked;
+    this.bookChecked = snapshot.bookChecked ?? -1;
     this.recorder = snapshot.recorder
       ? { ...snapshot.recorder, secret: this.env.MARKET_SECRET, fs: new FirestoreRest(this.env.FIREBASE_PROJECT_ID, this.token?.value ?? "", this.env.FIRESTORE_HOST) }
       : null;
@@ -439,6 +454,11 @@ export class TickRunner {
       world = await observeWorld(fs, at).catch((error) => { console.error("observe", error); return undefined; });
       this.worldChecked = tenth;
     }
+    if (world !== undefined || this.bookChecked !== tenth) {
+      // The ledger follows debts and funds that players change without the dealer; ten minutes late is fine.
+      this.bookChecked = tenth;
+      await writeBook(fs, at).catch((error) => console.error("book", error));
+    }
     const result = await recordTick(recorder, at, { world, news: this.news, events: this.events, regimes: this.regimes, info: this.info });
     if (result.status === "written") await this.announce(result.feed);
     return result;
@@ -476,6 +496,7 @@ export interface RunnerSnapshot {
   posted?: { day: number; count: number };
   minuteChecked: number;
   worldChecked: number;
+  bookChecked?: number;
 }
 
 interface AlarmStorage {

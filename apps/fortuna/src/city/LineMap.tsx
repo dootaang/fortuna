@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
-import { LINES, LINE_IDS, STATIONS, stationsOf, type LineId, type PlaceId, type Station } from "@fortuna/core";
+import { FRONT_MAX, LINES, LINE_IDS, STATIONS, stationsOf, type FrontDistrict, type LineId, type PlaceId, type Station } from "@fortuna/core";
 import { cx } from "../ui/kit.tsx";
 
 /**
@@ -27,10 +27,12 @@ function labelAt(station: Station): { x: number; y: number; anchor: "start" | "m
   return { x, y, anchor: dx > 0.35 ? "start" : dx < -0.35 ? "end" : "middle" };
 }
 
-export function LineMap({ here, info, closed, onPick, selected }: {
+export function LineMap({ here, info, closed, fronts, onPick, selected }: {
   here: PlaceId | null;
   info: Map<PlaceId, StopInfo>;
   closed: Set<LineId>;
+  /** Clock steps per district; drawn as four pips under the line's name (무월리: the count of hotel rules). */
+  fronts?: Map<FrontDistrict, number>;
   onPick: (place: PlaceId) => void;
   selected?: PlaceId | null;
 }) {
@@ -69,6 +71,7 @@ export function LineMap({ here, info, closed, onPick, selected }: {
               <text x={tx} y={ty} textAnchor={Math.cos(a) > 0.35 ? "start" : Math.cos(a) < -0.35 ? "end" : "middle"} fill={def.light} fontSize="17" fontWeight="700" letterSpacing="1">
                 {def.name}{closed.has(id) ? " · 운휴" : ""}
               </text>
+              {fronts && <FrontPips x={tx} y={ty + 14} anchor={Math.cos(a) > 0.35 ? "start" : Math.cos(a) < -0.35 ? "end" : "middle"} step={fronts.get(def.district as FrontDistrict) ?? 0} color={def.light} hotel={id === "horror"} />}
             </g>
           );
         })}
@@ -110,5 +113,21 @@ export function LineMap({ here, info, closed, onPick, selected }: {
         })}
       </svg>
     </div>
+  );
+}
+
+/** Four pips for a district's clock (red when full); 무월리 shows how many hotel rules have grown instead. */
+function FrontPips({ x, y, anchor, step, color, hotel }: { x: number; y: number; anchor: "start" | "middle" | "end"; step: number; color: string; hotel: boolean }) {
+  if (hotel) {
+    return step > 0 ? <text x={x} y={y + 10} textAnchor={anchor} fontSize="13" fill={color} fontStyle="italic">수칙 {7 + step}항</text> : null;
+  }
+  const w = FRONT_MAX * 16, left = anchor === "start" ? x : anchor === "end" ? x - w : x - w / 2;
+  return (
+    <g aria-label={`전선 시계 ${step}/${FRONT_MAX}`}>
+      {Array.from({ length: FRONT_MAX }, (_, i) => (
+        <rect key={i} x={left + i * 16} y={y} width="12" height="8" rx="1.5" stroke={color} strokeWidth="1.5"
+          fill={i < step ? (step >= FRONT_MAX ? "#e5484d" : color) : "transparent"} fillOpacity={i < step ? 0.9 : 0} />
+      ))}
+    </g>
   );
 }

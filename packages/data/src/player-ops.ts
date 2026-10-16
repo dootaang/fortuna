@@ -1,6 +1,6 @@
 import { getDoc, increment, runTransaction, serverTimestamp, setDoc, type Firestore, type Timestamp, type Transaction } from "firebase/firestore";
 import {
-  GAMES, accessCodeHash, arrivalSlip, borrowDebt, bumpCounters, normalizeEconomy, periodWords, replayWager, skillCost, wageFor, wageSlip, wagerTrace,
+  GAMES, ledgerId, accessCodeHash, arrivalSlip, borrowDebt, bumpCounters, normalizeEconomy, periodWords, replayWager, skillCost, wageFor, wageSlip, wagerTrace,
   type GameId, type Venue, type Wallet, type WorkTemplate,
 } from "@fortuna/core";
 import { FortunaError, writeEntry, type Clock, type PlayerSession, type Session } from "./ledger-write.ts";
@@ -169,6 +169,25 @@ export async function repayDebt(session: PlayerSession, amount: number): Promise
       type: "repay", actor: "player", delta: -amount, debtDelta: -amount, vaultDelta: amount, detail: { amount },
       ...(amount === wallet.debt ? { event: { kind: "repaid" as const } } : {}),
     });
+  });
+}
+
+/**
+ * Pay off part of another player's debt: my coins go to the vault and their debt goes down,
+ * as two ledger entries (mine and theirs) that point at each other.
+ */
+export async function repayFor(session: PlayerSession, to: string, amount: number): Promise<string> {
+  if (to === session.pid) throw new FortunaError("to", "자기 빚은 빚 갚기에서 갚습니다.");
+  return runTransaction(session.db, async (tx) => {
+    const wallet = await readWallet(tx, session);
+    const theirs = (await tx.get(refs.wallet(session.db, to))).data();
+    requireArrived(wallet);
+    if (!theirs?.arrived) throw new FortunaError("to", "아직 도착하지 않은 승객입니다.");
+    if (!Number.isInteger(amount) || amount <= 0) throw new FortunaError("amount", "금액을 확인해 주세요.");
+    if (amount > theirs.debt) throw new FortunaError("debt-negative", "남은 빚보다 많이 갚을 수는 없습니다.");
+    const mine = ledgerId(session.pid, wallet.seq + 1), other = ledgerId(to, theirs.seq + 1);
+    writeEntry(tx, session, to, theirs, { type: "repaidBy", actor: "friend", delta: 0, debtDelta: -amount, vaultDelta: 0, detail: { from: session.pid, amount, ledger: mine } });
+    return writeEntry(tx, session, session.pid, wallet, { type: "repayFor", actor: "player", delta: -amount, vaultDelta: amount, detail: { to, amount, ledger: other } });
   });
 }
 

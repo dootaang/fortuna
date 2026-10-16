@@ -57,11 +57,13 @@ describe("access codes", () => {
     expect((await getDoc(refs.wallet(again.db, pid))).exists()).toBe(true);
   });
 
-  it("players cannot see each other", async () => {
+  it("players see each other's wallets (to pay a friend's debt) but not each other's records", async () => {
     const { admin, player } = await cityWithPlayer();
     const other = await createPlayer(admin, { name: "벨라", districtId: "romance", skills: [], note: "" });
-    await denied(getDoc(refs.wallet(player.db, other.pid)));
+    expect((await getDoc(refs.wallet(player.db, other.pid))).exists()).toBe(true);
     await denied(getDoc(refs.player(player.db, other.pid)));
+    const stranger = await anonymousSession();
+    await denied(getDoc(refs.wallet(stranger.db, other.pid)));
   });
 });
 

@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { limit, onSnapshot, orderBy, query, where, type Query } from "firebase/firestore";
-import { isPlaceId, normalizeSprite, type LineId, type PlaceId } from "@fortuna/core";
+import { FRONT_DISTRICTS, isPlaceId, normalizeSprite, type FrontDistrict, type LineId, type PlaceId } from "@fortuna/core";
 import {
-  cityRefs, sessionOpen,
-  type ActorDoc, type ActivityDoc, type ContestDoc, type MessageDoc, type NpcDoc, type SceneDoc, type SceneImageDoc, type SessionDoc,
+  cityRefs, sessionOpen, storyRefs,
+  type ActorDoc, type ActivityDoc, type ContestDoc, type FightFields, type MessageDoc, type NpcDoc, type SceneDoc, type SceneImageDoc, type SessionDoc,
 } from "@fortuna/data";
 import { db } from "../firebase.ts";
 
@@ -90,6 +90,10 @@ export interface CityData {
   npcs: Map<string, NpcDoc & { id: string }>;
   closedLines: Set<LineId>;
   session: (SessionDoc & { id: string }) | null;
+  /** Whether the dealer has revealed the ledger. */
+  bookRevealed: boolean;
+  /** Clock steps (0–4) of the seven districts. */
+  fronts: Map<FrontDistrict, number>;
 }
 
 /** Images, NPCs, closed lines and the open session: small collections every city screen needs. */
@@ -97,8 +101,13 @@ export function useCityData(nowMs: number): CityData {
   const images = useSnapshotList(() => cityRefs.images(db), "images");
   const npcs = useSnapshotList(() => cityRefs.npcs(db), "npcs");
   const sessions = useSnapshotList(() => query(cityRefs.sessions(db), where("closedAt", "==", null)), "sessions:open");
+  const fronts = useSnapshotList(() => storyRefs.fronts(db), "fronts");
   const [closedLines, setClosedLines] = useState<Set<LineId>>(new Set());
-  useEffect(() => onSnapshot(cityRefs.config(db), (snapshot) => setClosedLines(new Set(snapshot.data()?.closedLines ?? [])), () => undefined), []);
+  const [bookRevealed, setBookRevealed] = useState(false);
+  useEffect(() => onSnapshot(cityRefs.config(db), (snapshot) => {
+    setClosedLines(new Set(snapshot.data()?.closedLines ?? []));
+    setBookRevealed(snapshot.data()?.bookRevealed === true);
+  }, () => undefined), []);
   return useMemo(() => {
     const open = sessions.rows.map((row) => ({ ...row.data, id: row.id })).filter((session) => sessionOpen(session, nowMs))
       .sort((a, b) => ms(b.openedAt) - ms(a.openedAt))[0] ?? null;
@@ -106,14 +115,17 @@ export function useCityData(nowMs: number): CityData {
       images: new Map(images.rows.map((row) => [row.id, { ...row.data, id: row.id }])),
       npcs: new Map(npcs.rows.map((row) => [row.id, { ...row.data, id: row.id }])),
       closedLines,
+      bookRevealed,
       session: open,
+      fronts: new Map(fronts.rows.filter((row) => (FRONT_DISTRICTS as readonly string[]).includes(row.id)).map((row) => [row.id as FrontDistrict, row.data.step])),
     };
-  }, [images.rows, npcs.rows, sessions.rows, closedLines, Math.floor(nowMs / 60_000)]);
+  }, [images.rows, npcs.rows, sessions.rows, fronts.rows, closedLines, bookRevealed, Math.floor(nowMs / 60_000)]);
 }
 
-export function useOpenContest(place: PlaceId): (ContestDoc & { id: string }) | null {
+export type OpenContest = ContestDoc & Partial<FightFields> & { id: string };
+export function useOpenContest(place: PlaceId): OpenContest | null {
   const { rows } = useSnapshotList(() => query(cityRefs.contests(db), where("place", "==", place), where("status", "==", "open")), `contest:${place}`);
-  return rows[0] ? { ...rows[0].data, id: rows[0].id } : null;
+  return rows[0] ? { ...(rows[0].data as ContestDoc & Partial<FightFields>), id: rows[0].id } : null;
 }
 
 /** Skill payments made for a contest, highest score first. */

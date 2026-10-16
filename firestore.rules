@@ -140,7 +140,8 @@ service cloud.firestore {
 
     // ── 지갑 ──
     match /wallets/{pid} {
-      allow read: if isAdmin() || isPlayer(pid) || isOracle();
+      // 동료의 빚을 대신 갚으려면 남은 빚이 보여야 한다(도시의 승객끼리는 지갑을 볼 수 있다).
+      allow read: if isAdmin() || isPlayer(pid) || isOracle() || cityPlayer();
       allow create: if isAdmin() && request.resource.data == {
         'playerId': pid, 'balance': 0, 'debt': 0, 'seq': 0, 'arrived': false,
         'periodIndex': 0, 'workUsed': 0, 'gambleUsed': 0, 'openWager': null, 'room': null,
@@ -204,6 +205,7 @@ service cloud.firestore {
         && (
           (e.actor == 'admin' && isAdmin() && adminEntry(entryId, e, before, after))
           || (e.actor == 'player' && isPlayer(pid) && e.memo == '' && playerEntry(entryId, e, before, after))
+          || (e.actor == 'friend' && e.type == 'repaidBy' && e.memo == '' && repaidByOk(entryId, e, before, after))
         );
     }
 
@@ -221,6 +223,7 @@ service cloud.firestore {
         || (e.type == 'betSettle' && betSettleOk(e, before, after))
         || (e.type == 'skill' && skillOk(e, before, after))
         || (e.type == 'repay' && repayOk(e, before, after))
+        || (e.type == 'repayFor' && repayForOk(entryId, e, before, after))
         || (e.type == 'jointDeposit' && jointOk(entryId, e, before, after))
         || (e.type == 'fundContribution' && fundOk(entryId, e, before, after))
         || (e.type == 'shop' && shopOk(entryId, e, before, after))
@@ -330,6 +333,29 @@ service cloud.firestore {
         && d.amount is int && d.amount > 0 && d.amount <= before.debt
         && e.delta == -d.amount && e.debtDelta == -d.amount && e.vaultDelta == d.amount
         && onlyChanged(before, after, ['balance', 'debt', 'seq']);
+    }
+
+    // 동료 빚 대납: 내 장부(repayFor)와 상대 장부(repaidBy)가 같은 묶음에서 서로를 가리키고 금액이 같다.
+    function repayForOk(entryId, e, before, after) {
+      let d = e.detail;
+      let other = getAfter(ledgerPath(d.ledger)).data;
+      return d.keys().hasOnly(['to', 'amount', 'ledger'])
+        && d.amount is int && d.amount > 0 && d.to != e.playerId
+        && e.delta == -d.amount && e.debtDelta == 0 && e.vaultDelta == d.amount
+        && ledgerCreatedNow(d.ledger) && other.playerId == d.to && other.type == 'repaidBy'
+        && other.detail.from == e.playerId && other.detail.ledger == entryId && other.detail.amount == d.amount
+        && onlyChanged(before, after, ['balance', 'seq']);
+    }
+    function repaidByOk(entryId, e, before, after) {
+      let d = e.detail;
+      let other = getAfter(ledgerPath(d.ledger)).data;
+      return d.keys().hasOnly(['from', 'amount', 'ledger'])
+        && before.arrived == true && d.from != e.playerId && isPlayer(d.from)
+        && d.amount is int && d.amount > 0 && d.amount <= before.debt
+        && e.delta == 0 && e.debtDelta == -d.amount && e.vaultDelta == 0
+        && ledgerCreatedNow(d.ledger) && other.playerId == d.from && other.type == 'repayFor'
+        && other.detail.to == e.playerId && other.detail.ledger == entryId && other.detail.amount == d.amount
+        && onlyChanged(before, after, ['debt', 'seq']);
     }
 
     function jointOk(entryId, e, before, after) {
@@ -1223,6 +1249,52 @@ service cloud.firestore {
     match /sessions/{id} {
       allow read: if isAdmin() || cityPlayer();
       allow write: if isAdmin();
+    }
+
+    // ── 이야기 장치: 전선 시계 ── 모두 읽고 딜러만 한 칸씩 움직인다.
+    match /fronts/{district} {
+      allow read: if signedIn();
+      allow write: if isAdmin() && district in ['medieval', 'wuxia', 'modern', 'cyberpunk', 'scifi', 'romance', 'horror']
+        && request.resource.data.keys().hasOnly(['step', 'updatedAt'])
+        && request.resource.data.step is int && request.resource.data.step >= 0 && request.resource.data.step <= 4
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    // 단서: 원본과 이야기 자료는 딜러만(기록원은 장부 계산에 읽는다). 수첩의 카드는 그 플레이어와 딜러만 읽는다.
+    match /clues/{id} {
+      allow read: if isAdmin() || isOracle();
+      allow write: if isAdmin();
+    }
+    match /assists/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /lore/{id} {
+      allow read: if isAdmin() || (isOracle() && id == 'bookTitles');
+      allow write: if isAdmin();
+    }
+    // 장부: 딜러와 기록원이 같은 계산으로 쓴다. 플레이어는 딜러가 공개한 뒤에만 읽는다.
+    match /book/{id} {
+      allow read: if isAdmin() || isOracle() || (signedIn() && get(/databases/$(database)/documents/config/city).data.get('bookRevealed', false) == true);
+      allow write: if (isAdmin() || isOracle()) && id == 'main'
+        && request.resource.data.keys().hasOnly(['chapters', 'passengers', 'total', 'remaining', 'at']);
+    }
+    match /clueCards/{id} {
+      allow read: if isAdmin() || (signedIn() && exists(bindingPath()) && resource.data.playerId == myPid() && isPlayer(myPid()));
+      allow create: if (isAdmin() && clueCardShape(id, request.resource.data) && request.resource.data.from == 'gm')
+        || (signedIn() && exists(bindingPath()) && isPlayer(myPid()) && clueShared(id, request.resource.data));
+      allow update: if isAdmin() && clueCardShape(id, request.resource.data);
+      allow delete: if isAdmin();
+    }
+    function clueCardShape(id, c) {
+      return c.keys().hasOnly(['playerId', 'clueId', 'title', 'district', 'kind', 'public', 'secret', 'from', 'givenAt'])
+        && id == c.playerId + '_' + c.clueId && c.givenAt == request.time;
+    }
+    // 내 카드를 다른 플레이어에게 보여 준다: 내용은 내 카드와 같고, 보여 준 사람은 나.
+    function clueShared(id, c) {
+      let mine = get(/databases/$(database)/documents/clueCards/$(myPid() + '_' + c.clueId)).data;
+      return clueCardShape(id, c) && c.from == myPid() && c.playerId != myPid()
+        && exists(/databases/$(database)/documents/players/$(c.playerId))
+        && c.title == mine.title && c.district == mine.district && c.kind == mine.kind && c.public == mine.public && c.secret == mine.secret;
     }
 
     match /contests/{id} {

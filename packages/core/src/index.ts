@@ -12,6 +12,8 @@ export * from "./content/districts.ts";
 export * from "./content/text.ts";
 export * from "./content/games.ts";
 export * from "./content/notify.ts";
+export * from "./content/fronts.ts";
+export * from "./story/book.ts";
 export * from "./pvp/old-maid.ts";
 export * from "./market/coins.ts";
 export * from "./market/config.ts";

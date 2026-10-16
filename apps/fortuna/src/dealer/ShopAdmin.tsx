@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getDoc } from "firebase/firestore";
-import { SHOP_CATEGORIES, SHOP_CATEGORY_LABELS, deleteFund, deleteItem, refs, saveFund, saveItem, type FundDoc, type FundInput, type ItemInput, type ShopCategory, type ShopItemDoc } from "@fortuna/data";
+import { DISTRICTS } from "@fortuna/core";
+import { SHOP_CATEGORIES, SHOP_CATEGORY_LABELS, deleteFund, deleteItem, refreshBook, refs, saveFund, saveItem, type FundDoc, type FundInput, type ItemInput, type ShopCategory, type ShopItemDoc } from "@fortuna/data";
 import { useLiveQuery, type Row } from "../session/live.ts";
 import { Coins, Empty, Frame, Modal, NumberField, TextField, Toggle, cx, useAction } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
@@ -170,11 +171,18 @@ function FundEditor({ initial, onClose }: { initial: { id: string | null; data: 
             <option value="open">모금 중</option><option value="filled">달성</option><option value="closed">마감</option>
           </select>
         </label>
+        <label className="block">
+          <span className="field-label">장부 연결 (주민 빚 대납 모금함)</span>
+          <select className="field" value={fund.book ?? ""} onChange={(event) => set("book", event.target.value || null)}>
+            <option value="">연결 안 함</option>
+            {DISTRICTS.filter((entry) => entry.hasOfficer).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+          </select>
+        </label>
         <Toggle label="상점에 노출" checked={fund.visible} onChange={(value) => set("visible", value)} />
         <NumberField label="정렬 순서" value={fund.sortOrder} onChange={(value) => set("sortOrder", value)} />
         <div className="flex gap-2">
           {initial.id && <button type="button" className="btn btn-danger" disabled={busy} onClick={() => { if (window.confirm("모금함을 삭제할까요? 보탠 기록은 장부에 남습니다.")) void run(async () => { await deleteFund(session, initial.id as string); onClose(); }); }}>삭제</button>}
-          <button type="button" className="btn btn-gold flex-1" disabled={busy || !fund.title.trim()} onClick={() => void run(async () => { await saveFund(session, initial.id, fund); onClose(); }, "저장했습니다.")}>저장</button>
+          <button type="button" className="btn btn-gold flex-1" disabled={busy || !fund.title.trim()} onClick={() => void run(async () => { await saveFund(session, initial.id, fund); void refreshBook(session).catch(() => undefined); onClose(); }, "저장했습니다.")}>저장</button>
         </div>
       </div>
     </Modal>

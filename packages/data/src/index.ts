@@ -5,3 +5,4 @@ export * from "./admin-ops.ts";
 export * from "./pvp-ops.ts";
 export * from "./market-ops.ts";
 export * from "./city-ops.ts";
+export * from "./story-ops.ts";

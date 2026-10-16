@@ -7,6 +7,9 @@ import { cue } from "../fx/cues.ts";
 import { Splash, cx, useToast } from "../ui/kit.tsx";
 import { ChatPanel, PAGE, type ChatIdentity } from "./Chat.tsx";
 import { CharacterMaker } from "./CharacterMaker.tsx";
+import { BoardModal } from "./Board.tsx";
+import { LedgerBook, useBook } from "./LedgerBook.tsx";
+import { NotebookModal } from "./Notebook.tsx";
 import { LineMap, type StopInfo } from "./LineMap.tsx";
 import { SceneCard } from "./SceneCard.tsx";
 import { SkillSheet } from "./SkillSheet.tsx";
@@ -82,6 +85,7 @@ function SceneView({ me, actors, nowMs, identity, names, onMap, onLog, onEdit }:
   const here = actors.filter((row) => row.data.place === place && nowMs - row.seenMs < 6 * 60 * 60_000);
   const [tall, setTall] = useState(false);
   const [skill, setSkill] = useState<{ skillId: string; usedLevel: number } | null | undefined>(undefined);
+  const [notebook, setNotebook] = useState(false);
   const image = scene?.imageId ? data.images.get(scene.imageId) ?? null : null;
 
   // Reading the place counts as having read it (and visited it).
@@ -100,6 +104,7 @@ function SceneView({ me, actors, nowMs, identity, names, onMap, onLog, onEdit }:
       <div className="city-stage">
         <SceneCard place={place} scene={scene} image={image} compact={tall}>
           <div className="absolute right-3 top-3 z-10 flex gap-1.5">
+            <button type="button" className="city-btn" onClick={() => setNotebook(true)} aria-label="단서 수첩">📒</button>
             <button type="button" className="city-btn" onClick={onLog} aria-label="기록과 명장면">★</button>
             <button type="button" className="city-btn" onClick={onEdit} aria-label="모습 꾸미기">✎</button>
             <button type="button" className="city-btn md:hidden" onClick={() => setTall((value) => !value)} aria-label={tall ? "장면 크게" : "채팅 크게"}>{tall ? "▼" : "▲"}</button>
@@ -115,6 +120,7 @@ function SceneView({ me, actors, nowMs, identity, names, onMap, onLog, onEdit }:
       <div className="city-chat">
         <ChatPanel identity={sceneIdentity} place={place} sessionId={data.session?.id ?? null} contestId={contest?.id ?? null} people={names} />
       </div>
+      <NotebookModal open={notebook} onClose={() => setNotebook(false)} />
       {skill !== undefined && <SkillSheet open onClose={() => setSkill(undefined)} prefill={skill} place={place} sessionId={data.session?.id ?? null} contestId={contest?.id ?? null} />}
     </div>
   );
@@ -129,6 +135,7 @@ function MapView({ me, actors, onArrive, onBack }: { me: ActorRow; actors: Actor
   const reads = useReads(session.pid);
   const [selected, setSelected] = useState<PlaceId | null>(null);
   const [moving, setMoving] = useState(false);
+  const [board, setBoard] = useState(false);
   const here = me.data.place;
 
   const info = useMemo(() => {
@@ -159,12 +166,16 @@ function MapView({ me, actors, onArrive, onBack }: { me: ActorRow; actors: Actor
   return (
     <div className="city-shell">
       <div className="relative min-h-0 flex-1">
-        <LineMap here={here} info={info} closed={data.closedLines} onPick={(id) => { cue("tap"); setSelected(id); }} selected={selected} />
-        <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-2">
+        <LineMap here={here} info={info} closed={data.closedLines} fronts={data.fronts} onPick={(id) => { cue("tap"); setSelected(id); }} selected={selected} />
+        <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-2">
           <button type="button" className="city-btn pointer-events-auto" onClick={onBack}>← {STATIONS[here].name}</button>
-          <p className="city-plate text-[0.7rem] text-mist">● 가 본 역 · <span className="text-[#e5484d]">●</span> 새 이야기 · 숫자 = 사람</p>
+          <div className="flex flex-col items-end gap-1.5">
+            <button type="button" className="city-btn pointer-events-auto" onClick={() => setBoard(true)}>📋 역 게시판</button>
+            <p className="city-plate text-[0.7rem] text-mist">● 가 본 역 · <span className="text-[#e5484d]">●</span> 새 이야기 · 숫자 = 사람</p>
+          </div>
         </div>
       </div>
+      <BoardModal open={board} onClose={() => setBoard(false)} extraTabs={data.bookRevealed ? [["가죽 장부", <BookTab key="book" />]] : []} />
       {pick && (
         <div className="shrink-0 border-t border-gold-400/40 bg-felt-950 p-3 md:absolute md:bottom-4 md:right-4 md:w-96 md:rounded-sm md:border">
           <div className="flex items-start justify-between gap-2">
@@ -184,4 +195,8 @@ function MapView({ me, actors, onArrive, onBack }: { me: ActorRow; actors: Actor
       )}
     </div>
   );
+}
+
+function BookTab() {
+  return <LedgerBook book={useBook()} />;
 }

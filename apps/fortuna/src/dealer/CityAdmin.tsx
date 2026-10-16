@@ -17,6 +17,7 @@ import { ContestPanel, Presence, Records } from "../city/Stage.tsx";
 import { CityLookupProvider, useActors, useCityData, useLookups, useMessages, useOpenContest, useScene, useTicker } from "../city/useCity.ts";
 import { Empty, Frame, Notice, NumberField, TextField, cx, useAction, useToast } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
+import { FightControls, FightOpener, GiveClueDesk, StoryAdmin } from "./StoryAdmin.tsx";
 import "../city/city.css";
 
 /**
@@ -25,6 +26,7 @@ import "../city/city.css";
  */
 const SUBTABS = [
   { id: "scene", label: "장면 콘솔" },
+  { id: "story", label: "이야기" },
   { id: "npcs", label: "NPC" },
   { id: "cuts", label: "장면 컷" },
   { id: "ops", label: "세션·노선" },
@@ -46,6 +48,7 @@ export function CityAdmin() {
         ))}
       </div>
       {tab === "scene" && <SceneConsole nowMs={now} />}
+      {tab === "story" && <StoryAdmin />}
       {tab === "npcs" && <NpcManager />}
       {tab === "cuts" && <ImageShelf owner="cut" refId="" title="장면 컷" hint="채팅에 끼워 보내는 그림입니다. 장면 콘솔 채팅의 ⚡ 메뉴에서 보냅니다." />}
       {tab === "ops" && <Operations />}
@@ -149,6 +152,7 @@ function SceneConsole({ nowMs }: { nowMs: number }) {
         </Frame>
 
         <ContestDesk place={place} contest={contest} speaker={speaker} sessionId={data.session?.id ?? null} onError={(message) => toast("error", message)} />
+        <GiveClueDesk place={place} here={here.map((row) => ({ id: row.id, name: row.data.name }))} sessionId={data.session?.id ?? null} />
       </div>
 
       <div className="lg:sticky lg:top-28 lg:h-[calc(100dvh-8rem)]">
@@ -191,6 +195,7 @@ function ContestDesk({ place, contest, speaker, sessionId, onError }: {
           <TextField label="상대 (비우면 플레이어끼리)" value={boss} onChange={setBoss} placeholder="천마" maxLength={40} />
         </div>
         <button type="button" className="btn btn-gold btn-sm mt-2" disabled={busy} onClick={() => void run(async () => { await openContest(session, place, title, boss); setTitle(""); setBoss(""); })}>맞붙기 열기</button>
+        <FightOpener place={place} />
       </Frame>
     );
   }
@@ -198,6 +203,7 @@ function ContestDesk({ place, contest, speaker, sessionId, onError }: {
     <Frame className="!p-0">
       <ContestPanel contest={contest} controls={
         <div className="mt-2 space-y-2 border-t border-gold-400/20 pt-2">
+          {(contest.mode === "boss" || contest.mode === "final") && <FightControls contest={contest} sessionId={sessionId} />}
           {contest.bossName && (
             <div className="flex items-end gap-2">
               <div className="w-32"><NumberField label={`${contest.bossName} 점수`} value={bossScore} onChange={setBossScore} min={0} max={99} /></div>

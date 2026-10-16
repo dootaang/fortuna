@@ -160,4 +160,5 @@ export const PRESET_NPCS: readonly { id: string; name: string; line: LineId }[] 
   { id: "heavenly-demon", name: "천마", line: "wuxia" }, { id: "geum-manryang", name: "금만량", line: "wuxia" }, { id: "chairman", name: "회장", line: "cyberpunk" },
   { id: "mother", name: "마더", line: "scifi" }, { id: "grand-duke", name: "북부대공", line: "romance" }, { id: "duchess-rosalind", name: "로잘린드 공작부인", line: "romance" },
   { id: "hotel", name: "호텔", line: "horror" },
+  { id: "kang-mujin", name: "강무진", line: "modern" }, { id: "demon-scribe", name: "마왕의 서기관", line: "medieval" }, { id: "duke-butler", name: "대공의 집사", line: "romance" },
 ];
