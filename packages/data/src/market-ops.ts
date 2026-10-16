@@ -26,6 +26,31 @@ export async function readLatestTick(tx: Transaction, db: Firestore, nowMs: numb
   return { hour: found.hour, tick: found.doc.last };
 }
 
+/**
+ * The rules take only the newest tick (tickOk), so a tick the recorder writes between a transaction's reads and its
+ * commit comes back as permission-denied instead of an SDK retry. Run the trade again while the price has moved on.
+ */
+async function onNewestTick<T>(session: Session, trade: (seen: (seq: number) => void) => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    let used: number | null = null;
+    try {
+      return await trade((seq) => { used = seq; });
+    } catch (error) {
+      if (attempt >= 3 || used === null || (error as { code?: unknown }).code !== "permission-denied") throw error;
+      if ((await readNewestSeq(session.db, session.clock.now())) === used) throw error;
+    }
+  }
+}
+
+async function readNewestSeq(db: Firestore, nowMs: number): Promise<number | null> {
+  const hour = hourIndexAt(nowMs);
+  for (const index of [hour + 1, hour, hour - 1]) {
+    const data = (await getDoc(refs.marketHour(db, index))).data();
+    if (data) return data.last.seq;
+  }
+  return null;
+}
+
 function requireFresh(tick: TickDoc<Timestamp>, config: MarketConfig, nowMs: number) {
   if (nowMs - tick.at.toMillis() > (config.staleSeconds - 5) * 1000) throw new FortunaError("stale-price", "시세가 멈춰 있습니다. 잠시 후 다시 시도해 주세요.");
 }
@@ -38,9 +63,10 @@ export interface OpenRequest { coin: CoinId; side: Side; leverage: number; margi
 
 export async function openPosition(session: PlayerSession, request: OpenRequest): Promise<{ positionId: string; quote: OpenQuote }> {
   const { db } = session;
-  return runTransaction(db, async (tx) => {
+  return onNewestTick(session, (seen) => runTransaction(db, async (tx) => {
     const wallet = await readWallet(tx, session), economy = await readEconomy(tx, db), market = await readMarket(tx, db);
     const { hour, tick } = await readLatestTick(tx, db, session.clock.now());
+    seen(tick.seq);
     if (!wallet.arrived) throw new FortunaError("not-arrived", "먼저 도착 절차를 마쳐야 합니다.");
     if (!market.enabled) throw new FortunaError("market-closed", "거래소가 닫혀 있습니다.");
     if (!market.coins[request.coin].enabled) throw new FortunaError("coin-halted", "이 종목은 거래가 잠시 멈췄습니다.");
@@ -67,7 +93,7 @@ export async function openPosition(session: PlayerSession, request: OpenRequest)
       F0: tick.st.coins[request.coin].F ?? 0,
     });
     return { positionId, quote };
-  });
+  }));
 }
 
 const KIND_BY_STATUS: Partial<Record<PositionDoc["status"], CloseKind>> = { open: "close", capped: "cap", liquidated: "liquidated", void: "refund" };
@@ -83,7 +109,7 @@ export async function closePosition(session: PlayerSession, positionId: string, 
   // The rules count started hours (and 무월리의 밤) from the server's time; step off a boundary first.
   const peek = (await getDoc(refs.position(db, positionId))).data();
   if (peek?.status === "open") await awayFromBoundary(peek, session.clock.now.bind(session.clock));
-  return runTransaction(db, async (tx) => {
+  return onNewestTick(session, (seen) => runTransaction(db, async (tx) => {
     const wallet = await readWallet(tx, session), market = await readMarket(tx, db);
     const position = (await tx.get(refs.position(db, positionId))).data();
     if (!position || position.playerId !== session.pid) throw new FortunaError("no-position", "포지션을 찾을 수 없습니다.");
@@ -94,6 +120,7 @@ export async function closePosition(session: PlayerSession, positionId: string, 
     let fundingIndex: number | null = position.exitF ?? position.F0 ?? null;
     if (kind === "close") {
       const latest = await readLatestTick(tx, db, session.clock.now());
+      seen(latest.tick.seq);
       requireFresh(latest.tick, market, session.clock.now());
       hour = latest.hour; seq = latest.tick.seq; exit = latest.tick.p[position.coin]; closedAtMs = session.clock.now();
       fundingIndex = latest.tick.st.coins[position.coin].F ?? 0;
@@ -117,7 +144,7 @@ export async function closePosition(session: PlayerSession, positionId: string, 
       ...(kind === "close" ? { exit, exitSeq: seq, exitAt: serverTimestamp() } : {}),
     });
     return { ledgerId, positionId, quote, margin: position.margin, eventId: notify ? ledgerId : null, levy: week.levy };
-  });
+  }));
 }
 
 /** Wait out the few seconds around an hour boundary of the position, or 0/5 o'clock KST for MWL. */
@@ -144,9 +171,10 @@ export async function settleEndedPositions(session: PlayerSession, bigGamble = N
 
 export async function buySpot(session: PlayerSession, coin: CoinId, amount: number): Promise<{ ledgerId: string; quote: BuyQuote }> {
   const { db } = session;
-  return runTransaction(db, async (tx) => {
+  return onNewestTick(session, (seen) => runTransaction(db, async (tx) => {
     const wallet = await readWallet(tx, session), economy = await readEconomy(tx, db), market = await readMarket(tx, db);
     const { hour, tick } = await readLatestTick(tx, db, session.clock.now());
+    seen(tick.seq);
     const holdingRef = refs.holding(db, session.pid, coin), held = (await tx.get(holdingRef)).data();
     if (!wallet.arrived) throw new FortunaError("not-arrived", "먼저 도착 절차를 마쳐야 합니다.");
     if (!market.enabled) throw new FortunaError("market-closed", "거래소가 닫혀 있습니다.");
@@ -168,15 +196,16 @@ export async function buySpot(session: PlayerSession, coin: CoinId, amount: numb
     });
     tx.set(holdingRef, { playerId: session.pid, coin, units: (held?.units ?? 0) + quote.units, cost: (held?.cost ?? 0) + amount, lastLedger: ledgerId });
     return { ledgerId, quote };
-  });
+  }));
 }
 
 /** Sell `units` (1/10,000 coin) of a holding at the newest price; selling works even while buying is paused. */
 export async function sellSpot(session: PlayerSession, coin: CoinId, units: number): Promise<{ ledgerId: string; quote: SellQuote; levy: number }> {
   const { db } = session;
-  return runTransaction(db, async (tx) => {
+  return onNewestTick(session, (seen) => runTransaction(db, async (tx) => {
     const wallet = await readWallet(tx, session), market = await readMarket(tx, db);
     const { hour, tick } = await readLatestTick(tx, db, session.clock.now());
+    seen(tick.seq);
     const holdingRef = refs.holding(db, session.pid, coin), held = (await tx.get(holdingRef)).data();
     if (!held || held.units < 1) throw new FortunaError("no-holding", `가진 ${COINS[coin].name}이(가) 없습니다.`);
     if (!Number.isInteger(units) || units < 1 || units > held.units) throw new FortunaError("units", "팔 수량을 확인해 주세요.");
@@ -191,7 +220,7 @@ export async function sellSpot(session: PlayerSession, coin: CoinId, units: numb
     });
     tx.set(holdingRef, { playerId: session.pid, coin, units: held.units - units, cost: held.cost - quote.costOut, lastLedger: ledgerId });
     return { ledgerId, quote, levy: week.levy };
-  });
+  }));
 }
 
 // ── 딜러 ──

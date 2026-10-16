@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getAuth } from "firebase/auth";
-import { deleteField, doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
+import { Transaction, deleteField, doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
 import { DEFAULT_MARKET, earningsAt, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, reportAt, weekIndexAt, type CoinId } from "@fortuna/core";
 import {
   announceBossFight, arrive, buySpot, scheduleRate, cancelRate, scheduleRegime, cancelRegime, claimDividend, buyInfo, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
@@ -153,6 +153,26 @@ describe("positions", () => {
     expect(wallet2.market.open).toBe(0);
     expect((await rootData(`positions/${positionId}`))).toMatchObject({ status: "closed", outcome: "close", payout: expected.payout });
     await expect(closePosition(player, positionId)).rejects.toMatchObject({ code: "settled" });
+  });
+
+  it("trades again when a tick lands between the reads and the commit", async () => {
+    // The rules take only the newest tick, so such a commit is refused; the trade must retry at the new price.
+    const tickDuringNextTrade = () => {
+      const realGet = Transaction.prototype.get;
+      Transaction.prototype.get = async function (this: Transaction, ref: Parameters<Transaction["get"]>[0]) {
+        const snapshot = await realGet.call(this, ref);
+        if (ref.path.startsWith("market/h") && snapshot.exists()) { Transaction.prototype.get = realGet; await tick(); }
+        return snapshot;
+      } as Transaction["get"];
+    };
+    const { positionId } = await openPosition(player, { coin: "LNH", side: "long", leverage: 3, margin: 300 });
+    tickDuringNextTrade();
+    await closePosition(player, positionId);
+    expect((await rootData(`positions/${positionId}`))).toMatchObject({ status: "closed", exitSeq: Math.floor(clockMs / 15_000) });
+    const bought = await buySpot(player, "ORB", 300);
+    tickDuringNextTrade();
+    await sellSpot(player, "ORB", bought.quote.units);
+    expect(await rootData(`holdings/${player.pid}_ORB`)).toMatchObject({ units: 0 });
   });
 
   it("rejects a wrong price, a stale tick, too much leverage and too many positions", async () => {
