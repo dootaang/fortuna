@@ -22,7 +22,8 @@ export const FEED_TEXT = {
 } as const;
 
 export type FeedTone = "up" | "down" | "warn" | "info";
-export interface FeedItem { kind: string; coin: CoinId | null; tone: FeedTone; text: string; }
+/** `big`: a large automatic story (goes to Discord within the daily budget). */
+export interface FeedItem { kind: string; coin: CoinId | null; tone: FeedTone; text: string; big?: boolean; }
 
 export function liberationFeed(coin: CoinId): FeedItem {
   return { kind: "liberation", coin, tone: "up", text: fill(FEED_TEXT.liberation, { place: COINS[coin].place, coin }) };

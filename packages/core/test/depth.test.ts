@@ -231,3 +231,44 @@ describe("balance (원칙 4)", () => {
     console.info(`balance: hint reader ${(reader * 100).toFixed(1)}%, blind ${(blind * 100).toFixed(1)}%`);
   }, 180_000);
 });
+
+describe("automatic news balance (3단계, 원칙 4)", () => {
+  it("lets no simple news strategy beat 103%, at high leverage or none", async () => {
+    const { quoteClose, tradeFee } = await import("../src/index.ts");
+    const start = Date.UTC(2026, 9, 11, 15, 0), tick = 30, days = 120;
+    let state = initialMarketState(tickSeq(start, tick), start);
+    type Bet = { name: string; coin: CoinId; side: "long" | "short"; lev: number; entry: number; openedAtMs: number; closeAt: number; fee: number };
+    const open: Bet[] = [], paid: Record<string, number> = {}, cost: Record<string, number> = {}, count: Record<string, number> = {};
+    const enter = (name: string, coin: CoinId, dir: number, holdMs: number, atMs: number) => {
+      for (const lev of [1, coin === "FTN" ? 20 : 10]) {
+        const entry = state.coins[coin].p, fee = tradeFee(100 * lev, DEFAULT_MARKET);
+        open.push({ name: `${name}@${lev}x`, coin, side: dir > 0 ? "long" : "short", lev, entry, openedAtMs: atMs, closeAt: atMs + holdMs, fee });
+      }
+    };
+    for (let index = 1; index <= (days * 86_400) / tick; index += 1) {
+      const atMs = start + index * tick * 1000, seq = state.seq + 1, keys = seedKeys(seq, atMs, tick);
+      const stepped = stepMarket(state, { seq, atMs, seeds: { tick: marketSeed(SECRET, keys.tick), blcNow: marketSeed(SECRET, keys.blcNow), blcPast: marketSeed(SECRET, keys.blcPast), s9Week: marketSeed(SECRET, keys.s9Week) }, config: { ...DEFAULT_MARKET, tickSeconds: tick } });
+      state = stepped.state;
+      for (const item of stepped.feed) {
+        if (!item.coin) continue;
+        const dir = item.tone === "up" ? 1 : item.tone === "down" ? -1 : 0;
+        if (!dir) continue;
+        if (item.kind === "autoOfficial") enter("follow official", item.coin, dir, 2 * 3_600_000, atMs);
+        if (item.kind === "autoPaper") { enter("follow paper", item.coin, dir, 91 * 60_000, atMs); enter("fade paper", item.coin, -dir, 91 * 60_000, atMs); }
+        if (item.kind === "autoRumor") enter("follow rumor", item.coin, dir, 11 * 60_000, atMs);
+        if (item.kind === "autoTrue") enter("sell the news", item.coin, -dir, 3_600_000, atMs);
+      }
+      for (let i = open.length - 1; i >= 0; i -= 1) {
+        const bet = open[i]!, price = state.coins[bet.coin].p, move = 0.9 / bet.lev;
+        const liq = bet.lev > 1 && (bet.side === "long" ? price <= bet.entry * (1 - move) : price >= bet.entry * (1 + move));
+        if (atMs < bet.closeAt && !liq) continue;
+        const quote = quoteClose(DEFAULT_MARKET, { coin: bet.coin, side: bet.side, leverage: bet.lev, margin: 100, fee: bet.fee, entry: bet.entry, openedAtMs: bet.openedAtMs }, liq ? "liquidated" : "close", price, atMs);
+        paid[bet.name] = (paid[bet.name] ?? 0) + quote.payout; cost[bet.name] = (cost[bet.name] ?? 0) + 100 + bet.fee; count[bet.name] = (count[bet.name] ?? 0) + 1;
+        open.splice(i, 1);
+      }
+    }
+    const ratios = Object.fromEntries(Object.keys(paid).map((name) => [name, Math.round((paid[name]! / cost[name]!) * 1_000) / 10]));
+    for (const [name, ratio] of Object.entries(ratios)) expect(ratio, name).toBeLessThan(103);
+    expect(count["follow official@1x"]).toBeGreaterThan(100);
+  }, 300_000);
+});

@@ -47,13 +47,15 @@ export interface MarketConfig {
    * Per coin: trading switch (circuit breaker, also freezes the price), volatility multiplier, and
    * `paused` — new entries and buys stop after a 간부전 예고 until the district's liberation reaches the price.
    */
-  coins: Record<CoinId, { enabled: boolean; volMult: number; paused: boolean }>;
+  coins: Record<CoinId, { enabled: boolean; volMult: number; paused: boolean; autoNews: boolean }>;
   /** 환전가 특별 징수: a player's weekly exchange net profit above this is kept by the house (0 = off). */
   weeklyProfitCap: number;
   /** NPC 거래자 (docs/SPEC-MARKET-DEPTH.md 2-0): on/off and size multiplier. No coins move. */
   npc: { enabled: boolean; scale: number };
   /** 거래소 2부 2단계: weekly district earnings, hints, reports. */
   earnings: boolean;
+  /** 3단계: automatic news (also switchable per coin). */
+  autoNews: boolean;
 }
 
 export const DEFAULT_MARKET: MarketConfig = {
@@ -74,10 +76,11 @@ export const DEFAULT_MARKET: MarketConfig = {
   debtLink: true,
   staleSeconds: 90,
   tickSeconds: 15,
-  coins: Object.fromEntries(COIN_IDS.map((id) => [id, { enabled: true, volMult: 1, paused: false }])) as MarketConfig["coins"],
+  coins: Object.fromEntries(COIN_IDS.map((id) => [id, { enabled: true, volMult: 1, paused: false, autoNews: true }])) as MarketConfig["coins"],
   weeklyProfitCap: 5_000,
   npc: { enabled: true, scale: 1 },
   earnings: true,
+  autoNews: true,
 };
 
 const int = (value: unknown, fallback: number, min = 0, max = 1e9) => Math.round(numberOr(value, fallback, min, max));
@@ -114,11 +117,12 @@ export function normalizeMarket(raw: unknown): MarketConfig {
     tickSeconds: int(source.tickSeconds, d.tickSeconds, 10, 60),
     coins: Object.fromEntries(COIN_IDS.map((id) => {
       const stored = isRecord(coins[id]) ? coins[id] : {};
-      return [id, { enabled: bool(stored.enabled, true), volMult: numberOr(stored.volMult, 1, 0, 5), paused: bool(stored.paused, false) }];
+      return [id, { enabled: bool(stored.enabled, true), volMult: numberOr(stored.volMult, 1, 0, 5), paused: bool(stored.paused, false), autoNews: bool(stored.autoNews, true) }];
     })) as MarketConfig["coins"],
     weeklyProfitCap: int(source.weeklyProfitCap, d.weeklyProfitCap, 0, 1e9),
     npc: { enabled: bool(npc.enabled, d.npc.enabled), scale: numberOr(npc.scale, d.npc.scale, 0, 5) },
     earnings: bool(source.earnings, d.earnings),
+    autoNews: bool(source.autoNews, d.autoNews),
   };
 }
 

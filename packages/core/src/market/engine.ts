@@ -6,6 +6,7 @@ import { COIN_IDS, COINS, coinForDistrict, isMoonlessNight, type CoinId } from "
 import type { MarketConfig } from "./config.ts";
 import { FEED_TEXT, NEWS_SIZES, liberationFeed, type FeedItem, type NewsSize } from "./feed.ts";
 import { crowdSeed, initialCrowd, stepCrowd, usualSigma, type Crowd } from "./crowd.ts";
+import { NEWS_FACTOR_HOURS, newsSeed, stepAutoNews, type PendingNews } from "./autonews.ts";
 import { PEAD, PEAD_HOURS, PRE_BAKE, earningsAt, earningsFeed, earningsJump, heatShare, nextFf, rateFeed, rateShock } from "./fundamentals.ts";
 
 /**
@@ -45,6 +46,12 @@ export interface CoinTick {
   eh?: number[] | undefined;
   /** and the latest analyst band [low, high] in cents, so the next report can score it. */
   rb?: [number, number] | undefined;
+  /** 3단계 자동 뉴스: a story waiting to resolve, and the follow-through drift after one. */
+  an?: PendingNews | null | undefined;
+  nd?: number | undefined;
+  ndu?: number | undefined;
+  /** News factor on the anchor (0.7–1.4): the lasting part of stories, fading back to 1 over days. */
+  nf?: number | undefined;
 }
 
 export interface MarketState {
@@ -82,7 +89,7 @@ export interface StepInput {
   seq: number;
   atMs: number;
   seeds: StepSeeds;
-  config: Pick<MarketConfig, "tickSeconds" | "debtLink" | "coins"> & { npc?: MarketConfig["npc"] | undefined; earnings?: boolean | undefined };
+  config: Pick<MarketConfig, "tickSeconds" | "debtLink" | "coins"> & { npc?: MarketConfig["npc"] | undefined; earnings?: boolean | undefined; autoNews?: boolean | undefined };
   world?: WorldInput | undefined;
   news?: NewsShock[] | undefined;
   fundamentals?: FundamentalsInput | undefined;
@@ -165,7 +172,7 @@ export function s9RevisionAt(weekIndex: number, seed: number): number {
 }
 
 export function anchorOf(state: MarketState, id: CoinId, debtLink: boolean): number {
-  const base = COINS[id].anchor * state.coins[id].af * (state.coins[id].ff ?? 1);
+  const base = COINS[id].anchor * state.coins[id].af * (state.coins[id].ff ?? 1) * (state.coins[id].nf ?? 1);
   if (id === "FTN" && debtLink) return base * state.debtF;
   if (id === "WHL") return base * state.heatF;
   return base;
@@ -273,6 +280,16 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
       }
     }
     if (atMs < driftUntil) earningsMove += drift * hours; else drift = 0;
+    // 3단계 자동 뉴스 (its own random stream; a halted coin gets no news and keeps its pending story).
+    const haltedNow = config.coins[id]?.enabled === false;
+    let an = cs.an ?? null, nd = cs.nd ?? 0, ndu = cs.ndu ?? 0, lognf = Math.log(cs.nf ?? 1) * Math.exp(-hours / NEWS_FACTOR_HOURS);
+    if (atMs < ndu) earningsMove += nd * hours; else { nd = 0; ndu = 0; }
+    if (!haltedNow) {
+      const story = stepAutoNews(id, an, atMs, hours, config.autoNews !== false && config.coins[id]?.autoNews !== false, new XorShift32(newsSeed(input.seeds.tick, COIN_IDS.indexOf(id))));
+      earningsMove += story.move; an = story.pending; feed.push(...story.feed);
+      lognf = Math.min(Math.log(1.4), Math.max(Math.log(0.7), lognf + story.lasting));
+      if (story.drift) { nd = story.drift.perHour; ndu = story.drift.until; }
+    }
     const vol = def.volH * (config.coins[id]?.volMult ?? 1) * (storm ? 2.5 : 1) * boost.boost * night * tense * Math.sqrt(hours);
     const e = id === "FTN" ? common : def.beta * common + Math.sqrt(1 - def.beta * def.beta) * normal(rng);
     const noise = vol * e;
@@ -303,6 +320,7 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
       npc: crowd, lp: Math.round((lp0 + (Math.log(p) - lp0) * k) * 1e6) / 1e6, rv: Math.round(rv * 1e8) / 1e8,
       lq: Math.round((cs.lq ?? 0) * Math.exp(-hours) + liquidated),
       ff, pre: Math.round(pre * 1e6) / 1e6, drift: Math.round(drift * 1e7) / 1e7, driftUntil, spc, eh,
+      an: an ?? undefined, nd: Math.round(nd * 1e7) / 1e7, ndu, nf: Math.round(Math.exp(lognf) * 1e5) / 1e5,
     };
   }
   return { state: next, feed, flow };

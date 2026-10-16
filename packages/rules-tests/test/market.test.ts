@@ -166,7 +166,7 @@ describe("positions", () => {
     await rawOpen(player, "FTN", 20, 100);
     await saveMarket(admin, { ...DEFAULT_MARKET, maxOpen: 1 });
     await denied(rawOpen(player, "FTN", 5, 100));
-    await saveMarket(admin, { ...DEFAULT_MARKET, coins: { ...DEFAULT_MARKET.coins, ORB: { enabled: false, volMult: 1, paused: false } } });
+    await saveMarket(admin, { ...DEFAULT_MARKET, coins: { ...DEFAULT_MARKET.coins, ORB: { ...DEFAULT_MARKET.coins.ORB, enabled: false } } });
     await denied(rawOpen(player, "ORB", 3, 100));
     const hour = Math.floor(clockMs / 3_600_000);
     await asRoot((root) => root.doc(`market/h${hour}`).update({ "last.at": new Date(Date.now() - 120_000) }));

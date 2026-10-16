@@ -266,6 +266,7 @@ function MarketEditor({ market }: { market: MarketConfig }) {
           <Toggle label="NPC 거래자 (주민 군중)" checked={draft.npc.enabled} onChange={(enabled) => set({ npc: { ...draft.npc, enabled } })} hint="가상 포지션 묶음. 코인은 오가지 않고, 롱/숏·청산 지도·거래량에 섞여 보입니다." />
           <NumberField label="군중 규모 ×" value={draft.npc.scale} step={0.1} onChange={(scale) => set({ npc: { ...draft.npc, scale } })} min={0} max={5} />
           <Toggle label="구역 실적·리포트" checked={draft.earnings} onChange={(earnings) => set({ earnings })} hint="매일 21시 실적 발표, 다음 날 정오 리포트. 끄면 기준가 배율은 그대로 멈춥니다." />
+          <Toggle label="자동 뉴스" checked={draft.autoNews} onChange={(autoNews) => set({ autoNews })} hint="종목마다 하루 3건쯤: 공식(늘 사실) · 신문(80%) · 골목 소문(60%). 종목별로도 끌 수 있습니다." />
         </div>
         <p className="field-label mt-4">종목별 거래 정지 · 변동성 배수</p>
         <div className="grid gap-2 sm:grid-cols-3">
@@ -273,6 +274,7 @@ function MarketEditor({ market }: { market: MarketConfig }) {
             <div key={coin} className="rounded-sm border border-gold-400/20 p-2">
               <Toggle label={`${coin} 거래`} checked={draft.coins[coin].enabled} onChange={(enabled) => setDraft({ ...draft, coins: { ...draft.coins, [coin]: { ...draft.coins[coin], enabled } } })} hint="끄면 가격도 멈춥니다" />
               <Toggle label="간부전 대기" checked={draft.coins[coin].paused} onChange={(paused) => setDraft({ ...draft, coins: { ...draft.coins, [coin]: { ...draft.coins[coin], paused } } })} hint="새 진입·매수만 정지, 해방 반영 시 자동 해제" />
+              <Toggle label="자동 뉴스" checked={draft.coins[coin].autoNews} onChange={(autoNews) => setDraft({ ...draft, coins: { ...draft.coins, [coin]: { ...draft.coins[coin], autoNews } } })} />
               <NumberField label="변동성 ×" value={draft.coins[coin].volMult} step={0.1} onChange={(volMult) => setDraft({ ...draft, coins: { ...draft.coins, [coin]: { ...draft.coins[coin], volMult } } })} min={0} max={5} />
             </div>
           ))}

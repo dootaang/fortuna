@@ -363,7 +363,8 @@ export class TickRunner {
     if (this.posted.day !== day) this.posted = { day, count: 0 };
     // Dealer news, liberations and the house always go out; earnings, reports and rates share a daily budget.
     const always = feed.filter((item) => ["news", "liberation", "houseOpen"].includes(item.kind));
-    const budget = feed.filter((item) => FEED_TO_DISCORD.has(item.kind) && !always.includes(item)).slice(0, Math.max(0, DISCORD_DAILY_MAX - this.posted.count));
+    // Earnings, reports, rate decisions and big automatic stories (with their corrections) share a daily budget.
+    const budget = feed.filter((item) => (FEED_TO_DISCORD.has(item.kind) || item.big === true) && !always.includes(item)).slice(0, Math.max(0, DISCORD_DAILY_MAX - this.posted.count));
     const lines = [...always, ...budget].map((item) => `📈 **환전가 소식** ${item.coin ? `[${item.coin}] ` : ""}${item.text}`);
     if (lines.length && this.notify.enabled.market && this.env.DISCORD_WEBHOOK_URL) this.posted.count += budget.length;
     if (!lines.length || !this.notify.enabled.market || !this.env.DISCORD_WEBHOOK_URL) return;
