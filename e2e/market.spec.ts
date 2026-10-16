@@ -35,8 +35,19 @@ test("exchange: board, chart, leveraged long with the loan slip, close", async (
   await page.waitForTimeout(2_500);
   await page.screenshot({ path: "test-results/shots/30-market-board.png", fullPage: true, animations: "disabled" });
 
+  // 시장 정보: calendar, district earnings board, reports.
+  await page.getByRole("link", { name: /시장 정보/ }).click();
+  await expect(page.getByRole("heading", { name: "시장 정보" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "이번 주 일정" })).toBeVisible();
+  await expect(page.getByLabel("구역 실적판")).toContainText("로엔하임");
+  await expect(page.getByLabel("구역 실적판")).toContainText(/보통 대비|플레이어 주민 없음/);
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: "test-results/shots/37-market-info.png", fullPage: true, animations: "disabled" });
+  await page.getByRole("link", { name: "← 시세판" }).click();
+
   await page.getByRole("link", { name: /포르투나 코인/ }).click();
   await expect(page.getByRole("heading", { name: "포르투나 코인" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "가치" })).toBeVisible();
   await expect(page.getByRole("img", { name: /FTN 가격 차트/ })).toBeVisible();
 
   // Indicators and the market structure.
@@ -107,5 +118,13 @@ test("dealer: exchange tab shows the recorder, positions and news desk", async (
   await expect(page.getByText("중원 간부전을 예고했습니다.")).toBeVisible();
   await expect(page.getByText(/간부전 대기 \(새 진입·매수 정지\)/)).toBeVisible();
   await expect(page.getByText("중원 간부전이 예고되었다. 거리의 말소리가 낮아진다.")).toBeVisible();
+  // 지배인 금리 결정: announce one, see it pending, cancel it.
+  const desk = page.locator("section", { hasText: "지배인 금리 결정" });
+  await desk.getByLabel("새 이자 (bp/시간)").fill("25");
+  await desk.getByLabel("몇 시간 뒤").fill("2");
+  await desk.getByRole("button", { name: "예고하기" }).click();
+  await expect(desk.getByText(/시간당 0\.25%/)).toBeVisible();
   await page.screenshot({ path: "test-results/shots/34-dealer-market.png", fullPage: true, animations: "disabled" });
+  await desk.getByRole("button", { name: "취소" }).click();
+  await expect(desk.getByText(/시간당 0\.25%/)).toHaveCount(0);
 });

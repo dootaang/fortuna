@@ -6,6 +6,7 @@ import { COIN_IDS, COINS, coinForDistrict, isMoonlessNight, type CoinId } from "
 import type { MarketConfig } from "./config.ts";
 import { FEED_TEXT, NEWS_SIZES, liberationFeed, type FeedItem, type NewsSize } from "./feed.ts";
 import { crowdSeed, initialCrowd, stepCrowd, usualSigma, type Crowd } from "./crowd.ts";
+import { PEAD, PEAD_HOURS, PRE_BAKE, earningsAt, earningsFeed, earningsJump, heatShare, nextFf, rateFeed, rateShock } from "./fundamentals.ts";
 
 /**
  * 시세 엔진. The price recorder (apps/notifier, cron) calls `stepMarket` once per tick.
@@ -31,6 +32,19 @@ export interface CoinTick {
   rv?: number | undefined;
   /** and notional liquidated, decaying over about an hour (crowd + players). */
   lq?: number | undefined;
+  /** 2단계 실적: the anchor's fundamental factor (0.8–1.3), */
+  ff?: number | undefined;
+  /** the log return already priced in from this week's hints, */
+  pre?: number | undefined;
+  /** post-earnings drift (log return per hour) and when it stops, */
+  drift?: number | undefined;
+  driftUntil?: number | undefined;
+  /** the players' share of the coming surprise (last observed), */
+  spc?: number | undefined;
+  /** the last four surprises (public after each announcement), */
+  eh?: number[] | undefined;
+  /** and the latest analyst band [low, high] in cents, so the next report can score it. */
+  rb?: [number, number] | undefined;
 }
 
 export interface MarketState {
@@ -48,7 +62,17 @@ export interface MarketState {
   heatF: number;
 }
 
-export interface WorldInput { liberated: string[]; houseOpen: boolean; debtF: number; heatF: number; }
+export interface WorldInput {
+  liberated: string[];
+  houseOpen: boolean;
+  debtF: number;
+  heatF: number;
+  /** Players' share of each coin's coming surprise (2단계), from resident activity. */
+  spc?: Partial<Record<CoinId, number>> | undefined;
+}
+
+/** What only the recorder can compute for earnings: the residents' (NPC) surprise of this week and today's blurred hint. */
+export interface FundamentalsInput { sNpc: Record<CoinId, number>; mood: Record<CoinId, number>; }
 
 export interface NewsShock { id: string; coin: CoinId; dir: 1 | -1 | 0; size: NewsSize; minutes: number; headline: string; }
 
@@ -58,9 +82,12 @@ export interface StepInput {
   seq: number;
   atMs: number;
   seeds: StepSeeds;
-  config: Pick<MarketConfig, "tickSeconds" | "debtLink" | "coins"> & { npc?: MarketConfig["npc"] | undefined };
+  config: Pick<MarketConfig, "tickSeconds" | "debtLink" | "coins"> & { npc?: MarketConfig["npc"] | undefined; earnings?: boolean | undefined };
   world?: WorldInput | undefined;
   news?: NewsShock[] | undefined;
+  fundamentals?: FundamentalsInput | undefined;
+  /** A rate decision landing this tick: change of the hourly interest in basis points. */
+  rate?: { fromBps: number; toBps: number } | undefined;
 }
 
 /** The 32-bit seed behind one random decision; only the recorder knows `secret`. */
@@ -138,7 +165,7 @@ export function s9RevisionAt(weekIndex: number, seed: number): number {
 }
 
 export function anchorOf(state: MarketState, id: CoinId, debtLink: boolean): number {
-  const base = COINS[id].anchor * state.coins[id].af;
+  const base = COINS[id].anchor * state.coins[id].af * (state.coins[id].ff ?? 1);
   if (id === "FTN" && debtLink) return base * state.debtF;
   if (id === "WHL") return base * state.heatF;
   return base;
@@ -202,6 +229,13 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
     feed.push({ kind: "news", coin: shock.coin, tone: shock.dir === 0 || shock.size === "z" ? "info" : dir > 0 ? "up" : "down", text: shock.headline });
   }
 
+  // 지배인 금리 결정.
+  if (input.rate) {
+    const delta = input.rate.toBps - input.rate.fromBps;
+    if (delta !== 0) for (const id of COIN_IDS) addJump(id, rateShock(id, delta));
+    feed.push(rateFeed(input.rate.fromBps, input.rate.toBps));
+  }
+
   const next: MarketState = {
     seq, atMs, prevSeq: state.seq, prev: { ...state.prev }, coins: { ...state.coins },
     liberated: [...world.liberated], houseOpen: world.houseOpen, debtF: world.debtF, heatF: world.heatF,
@@ -219,7 +253,27 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
     const storm = cs.storm ? rng.next() >= Math.min(1, hours) : rng.next() < hours / 24;
     const boost = boosts[id] ?? (atMs < cs.boostUntil ? { boost: cs.boost, until: cs.boostUntil } : { boost: 1, until: 0 });
     const night = id === "MWL" && isMoonlessNight(atMs) ? 4 : 1;
-    const vol = def.volH * (config.coins[id]?.volMult ?? 1) * (storm ? 2.5 : 1) * boost.boost * night * Math.sqrt(hours);
+    // 2단계 실적: price in half of what the week's hints point to, jump on the announcement, then drift.
+    let ff = cs.ff ?? 1, pre = cs.pre ?? 0, drift = cs.drift ?? 0, driftUntil = cs.driftUntil ?? 0, eh = cs.eh;
+    let earningsMove = 0, tense = 1;
+    const spc = id === "WHL" ? heatShare(world.heatF) : world.spc?.[id] ?? cs.spc ?? 0;
+    if (config.earnings !== false && input.fundamentals) {
+      const due = earningsAt(id, weekIndexAt(atMs));
+      if (prevMs < due && due <= atMs) {
+        const surprise = Math.round((input.fundamentals.sNpc[id] + spc) * 1_000) / 1_000, full = earningsJump(surprise);
+        earningsMove = full - pre;
+        pre = 0; ff = nextFf(ff, surprise); drift = (PEAD * full) / PEAD_HOURS; driftUntil = atMs + PEAD_HOURS * 3_600_000;
+        eh = [...(eh ?? []), surprise].slice(-4);
+        feed.push(earningsFeed(id, surprise));
+      } else if (atMs < due) {
+        const target = PRE_BAKE * earningsJump(input.fundamentals.mood[id] + spc), left = (due - atMs) / 3_600_000;
+        const step = (target - pre) * Math.min(1, hours / Math.max(hours, left));
+        earningsMove = step; pre += step;
+        if (left <= 1) tense = 1.3;
+      }
+    }
+    if (atMs < driftUntil) earningsMove += drift * hours; else drift = 0;
+    const vol = def.volH * (config.coins[id]?.volMult ?? 1) * (storm ? 2.5 : 1) * boost.boost * night * tense * Math.sqrt(hours);
     const e = id === "FTN" ? common : def.beta * common + Math.sqrt(1 - def.beta * def.beta) * normal(rng);
     const noise = vol * e;
     let r = noise - (vol * vol) / 2 + def.revertH * hours * Math.log(anchor / cs.p) + def.momentum * cs.mom;
@@ -229,7 +283,7 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
       r += Math.log(down ? 1 - size : 1 + size);
       if (id === "ORB") feed.push({ kind: "orbSaving", coin: "ORB", tone: "down", text: FEED_TEXT.orbSaving });
     }
-    r += jump[id] ?? 0;
+    r += (jump[id] ?? 0) + earningsMove;
     const base = def.anchor;
     // A halted coin (dealer circuit breaker) keeps its price, so nothing liquidates while nobody can trade it.
     const halted = config.coins[id]?.enabled === false;
@@ -248,6 +302,7 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
       p, af, storm, boost: boost.boost, boostUntil: boost.until, mom: 0.8 * cs.mom + 0.2 * noise,
       npc: crowd, lp: Math.round((lp0 + (Math.log(p) - lp0) * k) * 1e6) / 1e6, rv: Math.round(rv * 1e8) / 1e8,
       lq: Math.round((cs.lq ?? 0) * Math.exp(-hours) + liquidated),
+      ff, pre: Math.round(pre * 1e6) / 1e6, drift: Math.round(drift * 1e7) / 1e7, driftUntil, spc, eh,
     };
   }
   return { state: next, feed, flow };

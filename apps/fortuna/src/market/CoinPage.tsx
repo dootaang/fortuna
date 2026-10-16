@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import { COINS, entryPaused, isCoinId, leverageChoices, maxLeverage, quoteOpen, type CoinId, type MarketConfig, type OpenQuote, type Side } from "@fortuna/core";
+import { ANALYSTS, COINS, consensus, earningsIndex, entryPaused, isCoinId, leverageChoices, maxLeverage, moodWords, nextEarnings, quoteOpen, type CoinId, type MarketConfig, type OpenQuote, type Side } from "@fortuna/core";
 import { openPosition } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
@@ -10,7 +10,7 @@ import { ChartBoundary, INDICATORS, PriceChart, type ChartFlag, type ChartLine, 
 import { PositionCard } from "./Positions.tsx";
 import { SpotPanel } from "./SpotPanel.tsx";
 import { CoinBadge, FlapText, LiquidationMap, LongShortBar, changeText, priceText } from "./pieces.tsx";
-import { directionOf, openingPrice, useCountdown, useFeed, useMarketConfig, useMyPositions, useTape } from "./useMarket.ts";
+import { directionOf, latestReports, openingPrice, useCountdown, useFeed, useFundamentals, useMarketConfig, useMyPositions, useReports, useTape } from "./useMarket.ts";
 import "./market.css";
 
 const INDICATOR_KEY = "fortuna:market:indicators";
@@ -50,6 +50,9 @@ function CoinView({ coin }: { coin: CoinId }) {
     try { window.localStorage.setItem(INDICATOR_KEY, next.join(",")); } catch { /* not remembered */ }
   }
   const fx = tick?.fx;
+  const fundamentals = useFundamentals();
+  const report = latestReports(useReports(20)).get(coin);
+  const earned = tick?.st.coins[coin].eh ?? [];
 
   const lines: ChartLine[] = positions.filter((row) => row.data.status === "open").flatMap((row) => [
     { price: row.data.entry, color: "#e6c564", title: `${row.data.side === "long" ? "롱" : "숏"} 진입` },
@@ -90,6 +93,33 @@ function CoinView({ coin }: { coin: CoinId }) {
         </div>
         {lastChip && <p className="mt-1 px-1 text-[0.7rem] leading-snug text-mist">{INDICATORS.find((entry) => entry.id === lastChip)!.label}: {INDICATORS.find((entry) => entry.id === lastChip)!.hint}</p>}
       </Frame>
+
+      {market.earnings && (
+        <Frame className="mb-4">
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <h2 className="deco-title text-lg">가치</h2>
+            <Link to="/market/info" className="text-xs text-mist underline">시장 정보</Link>
+          </div>
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+            <dt className="text-mist">다음 {coin === "FTN" ? "경기 보고" : "실적 발표"}</dt>
+            <dd className="text-right">{new Intl.DateTimeFormat("ko-KR", { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Seoul" }).format(nextEarnings(coin, now()))}</dd>
+            <dt className="text-mist">예상치 · 지난 실적</dt>
+            <dd className="num text-right">{earningsIndex(consensus(earned))} · {earned.length ? earningsIndex(earned.at(-1)!) : "—"}</dd>
+            <dt className="text-mist">활동 배수</dt>
+            <dd className="num text-right" title="가격 ÷ (원래 기준가 × 지난 실적 지수). 낮을수록 활동에 비해 싸다.">{price && earned.length ? (price / (def.anchor * (1 + earned.at(-1)!))).toFixed(2) : "—"}</dd>
+            <dt className="text-mist">업계 분위기</dt>
+            <dd className="text-right">{fundamentals ? moodWords(fundamentals.coins[coin].mood) : "—"}</dd>
+            {ANALYSTS[coin] && <>
+              <dt className="text-mist">{ANALYSTS[coin]!.name}</dt>
+              <dd className="num text-right">{report ? `${priceText(report.report.low)}~${priceText(report.report.high)}` : "리포트 전"}</dd>
+            </>}
+            {report && price && <>
+              <dt className="text-mist">리포트 적정가 대비</dt>
+              <dd className={cx("num text-right", price < report.report.mid ? "tone-up" : "tone-down")}>{((price / report.report.mid) * 100).toFixed(0)}%</dd>
+            </>}
+          </dl>
+        </Frame>
+      )}
 
       {fx && (
         <Frame className="mb-4">

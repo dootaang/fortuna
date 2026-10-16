@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { orderBy, query, limit, where } from "firebase/firestore";
+import { collection, orderBy, query, limit, where, type CollectionReference, type Timestamp } from "firebase/firestore";
 import {
   COINS, COIN_IDS, NEWS_SIZE_LABELS, entryPaused, weekIndexAt, formatPrice, formatUnits, holdingValue, hourIndexAt, liveEquity, normalizeMarket,
-  type CoinId, type MarketConfig, type NewsSize,
+  type CoinId, type MarketConfig, type NewsSize, type RateEventDoc,
 } from "@fortuna/core";
-import { announceBossFight, cancelNews, refs, registerOracle, saveMarket, scheduleNews, setCoinPaused, voidPosition, type NewsInput } from "@fortuna/data";
+import { announceBossFight, cancelNews, cancelRate, refs, scheduleRate, registerOracle, saveMarket, scheduleNews, setCoinPaused, voidPosition, type NewsInput } from "@fortuna/data";
 import { useLiveDoc, useLiveQuery } from "../session/live.ts";
 import { Coins, Empty, Frame, Notice, NumberField, Stat, TextField, Toggle, cx, formatDate, useAction, useToast } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
@@ -21,6 +21,7 @@ export function MarketAdmin() {
       <OpenPositions market={market} />
       <Holdings />
       <NewsDesk />
+      <RateDesk market={market} />
       <WeekLevies market={market} />
       <MarketEditor key={JSON.stringify(market)} market={market} />
     </div>
@@ -264,6 +265,7 @@ function MarketEditor({ market }: { market: MarketConfig }) {
         <div className="grid gap-x-6 sm:grid-cols-2">
           <Toggle label="NPC 거래자 (주민 군중)" checked={draft.npc.enabled} onChange={(enabled) => set({ npc: { ...draft.npc, enabled } })} hint="가상 포지션 묶음. 코인은 오가지 않고, 롱/숏·청산 지도·거래량에 섞여 보입니다." />
           <NumberField label="군중 규모 ×" value={draft.npc.scale} step={0.1} onChange={(scale) => set({ npc: { ...draft.npc, scale } })} min={0} max={5} />
+          <Toggle label="구역 실적·리포트" checked={draft.earnings} onChange={(earnings) => set({ earnings })} hint="매일 21시 실적 발표, 다음 날 정오 리포트. 끄면 기준가 배율은 그대로 멈춥니다." />
         </div>
         <p className="field-label mt-4">종목별 거래 정지 · 변동성 배수</p>
         <div className="grid gap-2 sm:grid-cols-3">
@@ -282,6 +284,41 @@ function MarketEditor({ market }: { market: MarketConfig }) {
         })}>저장</button>
       </Frame>
     </section>
+  );
+}
+
+/** 지배인 금리 결정: announced ahead on the calendar, it moves prices when it lands (FTN −2% per +5bp, alts 1.3×). */
+function RateDesk({ market }: { market: MarketConfig }) {
+  const { session } = useDealer();
+  const events = useLiveQuery(query(collection(session.db, "marketEvents") as CollectionReference<RateEventDoc<Timestamp>>, where("status", "==", "pending")), "dealer:marketEvents");
+  const [bps, setBps] = useState(market.interestBps + 5);
+  const [hours, setHours] = useState(24);
+  const { busy, run } = useAction();
+  const pending = events.status === "ready" ? [...events.data].sort((a, b) => (a.data.at?.toMillis?.() ?? 0) - (b.data.at?.toMillis?.() ?? 0)) : [];
+  return (
+    <Frame>
+      <SectionTitle title="지배인 금리 결정" />
+      <p className="mb-2 text-xs text-mist">
+        지금 이자 시간당 {(market.interestBps / 100).toFixed(2)}%. 예고하면 시장 정보 일정에 바로 뜨고, 발표 순간 시세가 움직이고 이자율이 바뀝니다
+        (0.05%p 인상마다 FTN −2%, 알트는 1.3배). 플레이어는 결과(새 금리)를 미리 볼 수 있습니다.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="w-36"><NumberField label="새 이자 (bp/시간)" value={bps} onChange={setBps} min={0} max={1000} /></div>
+        <div className="w-36"><NumberField label="몇 시간 뒤" value={hours} onChange={setHours} min={0} max={168} suffix="시간" /></div>
+        <button type="button" className="btn btn-gold btn-sm mb-0.5" disabled={busy || !Number.isInteger(bps) || !Number.isFinite(hours)}
+          onClick={() => void run(() => scheduleRate(session, session.clock.now() + Math.round(hours * 3_600_000), bps))}>예고하기</button>
+      </div>
+      {pending.length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm">
+          {pending.map((row) => (
+            <li key={row.id} className="flex items-center justify-between gap-2 rounded-sm border border-gold-400/20 px-2 py-1">
+              <span>{formatDate(row.data.at?.toMillis?.() ?? 0)} · 시간당 {(row.data.bps / 100).toFixed(2)}%</span>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void run(() => cancelRate(session, row.id))}>취소</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Frame>
   );
 }
 

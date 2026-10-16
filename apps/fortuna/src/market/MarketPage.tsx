@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router";
-import { COINS, COIN_IDS, entryPaused, periodWords, weekIndexAt, type CoinId } from "@fortuna/core";
+import { COINS, COIN_IDS, entryPaused, periodWords, weekCalendar, weekIndexAt, type CoinId } from "@fortuna/core";
 import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
 import { Frame, Notice, PageTitle, cx, formatDate } from "../ui/kit.tsx";
@@ -8,7 +8,7 @@ import { VenueTabs } from "../pages/VenueList.tsx";
 import { PositionCard } from "./Positions.tsx";
 import { HoldingsList } from "./HoldingsList.tsx";
 import { CoinBadge, FearGreedGauge, FlapText, LongShortBar, Sparkline, changeText, priceText } from "./pieces.tsx";
-import { directionOf, openingPrice, useCountdown, useFeed, useMarketConfig, useMyPositions, useTape } from "./useMarket.ts";
+import { directionOf, openingPrice, useCountdown, useFeed, useMarketConfig, useMyPositions, useRateEvents, useTape } from "./useMarket.ts";
 import "./market.css";
 
 /** 환전가 거래소: the departure board of prices. */
@@ -26,6 +26,9 @@ export default function MarketPage() {
   const spotCounters = wallet.spot ?? { period: -1, used: 0 };
   const spotUsed = spotCounters.period === session.clock.period(economy.limitPeriod) ? spotCounters.used : 0;
   const stale = tick ? now() - tick.at.toMillis() > market.staleSeconds * 1000 : true;
+  const rates = useRateEvents().map((row) => ({ atMs: row.data.at?.toMillis?.() ?? 0, bps: row.data.bps }));
+  const upcoming = market.earnings ? [...weekCalendar(weekIndexAt(now()), rates), ...weekCalendar(weekIndexAt(now()) + 1, rates)]
+    .find((item) => item.atMs !== null && item.atMs > now() && (item.kind === "earnings" || item.kind === "rate")) : undefined;
 
   // One soft clack per tick, and the station bell when news lands.
   const lastSeq = useRef<number | null>(null);
@@ -65,6 +68,14 @@ export default function MarketPage() {
               {COIN_IDS.map((coin) => <BoardRow key={coin} coin={coin} tape={tape} halted={!market.coins[coin].enabled} paused={entryPaused(market, coin, tick?.st.liberated ?? [])} />)}
             </ul>
           </section>
+
+          <Link to="/market/info" className="deco-frame mb-4 flex items-center justify-between gap-2 px-3 py-2 text-sm">
+            <span>
+              <span className="deco-caps mr-2 text-[0.6rem]">시장 정보</span>
+              {upcoming?.atMs ? <>다음 일정 <b className="text-gold-200">{new Intl.DateTimeFormat("ko-KR", { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Seoul" }).format(upcoming.atMs)}</b> {upcoming.text}</> : "실적·리포트·일정"}
+            </span>
+            <span aria-hidden="true">→</span>
+          </Link>
 
           <Frame className="mb-4">
             <p className="flex flex-wrap justify-between gap-2 text-sm">

@@ -1,5 +1,5 @@
 import {
-  COIN_IDS, buildStructure, debtFactor, foldCandle, heatFactor, hourDocId, hourIndexAt, initialMarketState, isCoinId, marketSeed, minuteKey, normalizeMarket, normalizeNotify,
+  ANALYSTS, COIN_IDS, activityRatio, analystBand, anchorOf, buildStructure, coinForDistrict, debtFactor, fundamentalsInput, playerShare, reportAt, reportSeedKey, weekIndexAt, weekStartMs, foldCandle, heatFactor, hourDocId, hourIndexAt, initialMarketState, isCoinId, marketSeed, minuteKey, normalizeMarket, normalizeNotify,
   seedKeys, stateFromTick, stepMarket, tickFromState, tickSeq, triggerAt,
   type Candle, type CoinId, type OpenLot, type FeedItem, type MarketConfig, type MarketState, type NewsShock, type NewsSize, type TickDoc, type WorldInput,
 } from "@fortuna/core";
@@ -55,19 +55,60 @@ export async function loadRecorder(fs: FirestoreRest, secret: string, atMs: numb
   };
 }
 
-/** Liberations, house, total debt and table heat — read every ten minutes. */
-export async function observeWorld(fs: FirestoreRest, atMs: number): Promise<WorldInput> {
+/** Residents' activity this week (거래소 2부 4-1): ratio against an ordinary week, per coin. */
+export interface Activity { ratio: number | null; residents: number; }
+
+export interface World extends WorldInput { activity?: Record<CoinId, Activity> | undefined; }
+
+/** Liberations, house, total debt, table heat and resident activity — read every ten minutes. */
+export async function observeWorld(fs: FirestoreRest, atMs: number): Promise<World> {
   const [districts, economy, wallets, bets] = await Promise.all([
     fs.list("districts"), fs.get("config/economy", ["gambling"]), fs.list("wallets"), fs.countSince("ledger", "type", "betOpen", "at", atMs - 3_600_000),
   ]);
   const arrived = wallets.filter((wallet) => wallet.data.arrived === true);
   const totalDebt = arrived.reduce((sum, wallet) => sum + Number(wallet.data.debt ?? 0), 0);
-  return {
+  const world: World = {
     liberated: districts.filter((district) => district.data.liberated === true).map((district) => district.id).sort(),
     houseOpen: (economy?.data.gambling as { houseOpen?: unknown } | undefined)?.houseOpen === true,
     debtF: arrived.length ? debtFactor(totalDebt, arrived.length) : 1,
     heatF: heatFactor(bets),
   };
+  // Resident activity is an extra; prices keep their world even if it fails.
+  try {
+    const players = await fs.list("players");
+    const since = weekStartMs(weekIndexAt(atMs)), ids = new Set(arrived.map((wallet) => wallet.id));
+    const residents = players.filter((player) => ids.has(player.id));
+    const counts = await Promise.all(residents.map(async (player) => {
+      const [work, repay, skill] = await Promise.all([
+        fs.aggregate("ledger", { playerId: player.id, type: "work" }, "at", since, { count: true }),
+        fs.aggregate("ledger", { playerId: player.id, type: "repay" }, "at", since, { sum: "detail.amount" }),
+        fs.aggregate("ledger", { playerId: player.id, type: "skill" }, "at", since, { count: true }),
+      ]);
+      return { coin: coinForDistrict(String(player.data.districtId ?? "")), work, repay, skill };
+    }));
+    const activity = {} as Record<CoinId, Activity>, spc: Partial<Record<CoinId, number>> = {};
+    for (const coin of COIN_IDS) {
+      const mine = coin === "FTN" ? counts : counts.filter((entry) => entry.coin === coin);
+      const total = mine.reduce((sum, entry) => ({ work: sum.work + entry.work, repay: sum.repay + entry.repay, skill: sum.skill + entry.skill }), { work: 0, repay: 0, skill: 0 });
+      const ratio = activityRatio({ ...total, residents: mine.length });
+      activity[coin] = { ratio, residents: mine.length };
+      if (coin !== "WHL") spc[coin] = playerShare(ratio);
+    }
+    world.activity = activity; world.spc = spc;
+  } catch (error) { console.error("activity", error); }
+  return world;
+}
+
+/** HMAC seeds are a little costly; the same keys come back every tick of a day or week. */
+const seedCache = new Map<string, number>();
+function cachedSeed(secret: string, key: string): number {
+  let seed = seedCache.get(key);
+  if (seed === undefined) {
+    if (seedCache.size > 400) seedCache.clear();
+    seed = marketSeed(secret, key);
+    seedCache.set(key, seed);
+  }
+  return seed;
 }
 
 function shockOf(doc: Doc): NewsShock | null {
@@ -76,7 +117,7 @@ function shockOf(doc: Doc): NewsShock | null {
   return { id: doc.id, coin, dir, size: size as NewsSize, minutes: Math.max(1, Math.min(1_440, Number(minutes) || 30)), headline: String(headline ?? "").slice(0, 200) };
 }
 
-export interface TickOptions { world?: WorldInput | undefined; news?: Doc[] | undefined; }
+export interface TickOptions { world?: World | undefined; news?: Doc[] | undefined; events?: Doc[] | undefined; }
 
 export async function recordTick(recorder: Recorder, atMs: number, options: TickOptions = {}, retry = true): Promise<TickResult> {
   const { fs, config } = recorder, tickMs = config.tickSeconds * 1000;
@@ -92,7 +133,12 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
 
   const keys = seedKeys(seq, atMs, config.tickSeconds);
   const seeds = { tick: marketSeed(recorder.secret, keys.tick), blcNow: marketSeed(recorder.secret, keys.blcNow), blcPast: marketSeed(recorder.secret, keys.blcPast), s9Week: marketSeed(recorder.secret, keys.s9Week) };
-  const stepped = stepMarket(base, { seq, atMs, seeds, config, world: options.world, news: shocks });
+  const sign = (key: string) => cachedSeed(recorder.secret, key);
+  const fundamentals = config.earnings ? fundamentalsInput(sign, atMs) : undefined;
+  // 지배인 금리 결정: the first announced decision whose time has come.
+  const rateDoc = (options.events ?? []).find((doc) => doc.data.kind === "rate" && toMs(doc.data.at) <= atMs && Number.isInteger(doc.data.bps));
+  const rate = rateDoc ? { fromBps: config.interestBps, toBps: Number(rateDoc.data.bps) } : undefined;
+  const stepped = stepMarket(base, { seq, atMs, seeds, config, world: options.world, news: shocks, fundamentals, rate });
   const feed: FeedItem[] = [
     ...whispers.map((doc) => ({ kind: "whisper", coin: isCoinId(doc.data.coin) ? doc.data.coin : null, tone: "info" as const, text: String(doc.data.whisper).slice(0, 200) })),
     ...stepped.feed,
@@ -127,6 +173,24 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     lots.push({ coin, side, notional, liq: Number(doc.data.liq) });
   }
 
+  // 애널리스트 리포트: the day after each announcement, scoring the previous band against today's price.
+  const reports: Write[] = [];
+  const week = weekIndexAt(atMs);
+  for (const coin of COIN_IDS) {
+    const due = reportAt(coin, week), analyst = ANALYSTS[coin];
+    if (!analyst || !config.earnings || !(base.atMs < due && due <= atMs)) continue;
+    const tick = state.coins[coin], trend = tick.lp === undefined ? 0 : Math.log(tick.p) - tick.lp;
+    const band = analystBand(coin, Math.round(anchorOf(state, coin, config.debtLink)), tick.p, trend, sign(reportSeedKey(coin, week)));
+    if (!band) continue;
+    const prev = tick.rb ? { low: tick.rb[0], high: tick.rb[1], price: tick.p, hit: tick.p >= tick.rb[0] && tick.p <= tick.rb[1] } : null;
+    state.coins[coin] = { ...tick, rb: [band.low, band.high] };
+    reports.push({
+      update: { name: fs.name(`marketReports/${week}_${coin}`), fields: encodeFields({ coin, week, writer: analyst.name, ...band, price: tick.p, at: new Stamp(atMs), prev }) },
+      currentDocument: { exists: false },
+    });
+    feed.push({ kind: "report", coin, tone: "info", text: `${analyst.name}: ${coin} 적정가 ${(band.low / 100).toFixed(2)} ~ ${(band.high / 100).toFixed(2)}` });
+  }
+
   const hour = hourIndexAt(atMs), minute = minuteKey(atMs);
   const previous = recorder.hour === hour && recorder.minute === minute ? recorder.candle : null;
   const candle = Object.fromEntries(COIN_IDS.map((id) => [id, foldCandle(previous?.[id], state.coins[id].p, Math.round(volume[id]))])) as Record<CoinId, Candle>;
@@ -142,6 +206,22 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     })),
     ...due.map((doc) => ({ update: { name: doc.name, fields: encodeFields({ status: "published", publishedSeq: seq }) }, updateMask: { fieldPaths: ["status", "publishedSeq"] }, currentDocument: { updateTime: doc.updateTime } })),
     ...whispers.map((doc) => ({ update: { name: doc.name, fields: encodeFields({ whispered: true }) }, updateMask: { fieldPaths: ["whispered"] }, currentDocument: { updateTime: doc.updateTime } })),
+    ...reports,
+    ...(rateDoc && rate ? [
+      { update: { name: rateDoc.name, fields: encodeFields({ status: "done", appliedSeq: seq }) }, updateMask: { fieldPaths: ["status", "appliedSeq"] }, currentDocument: { updateTime: rateDoc.updateTime } },
+      { update: { name: fs.name("config/market"), fields: encodeFields({ interestBps: rate.toBps, lastRate: rateDoc.id }) }, updateMask: { fieldPaths: ["interestBps", "lastRate"] } },
+    ] : []),
+    ...(options.world?.activity && fundamentals ? [{
+      update: {
+        name: fs.name("market/fundamentals"),
+        fields: encodeFields({
+          at: new Stamp(atMs), week,
+          coins: Object.fromEntries(COIN_IDS.map((coin) => [coin, {
+            mood: fundamentals.mood[coin], ratio: options.world!.activity![coin].ratio, residents: options.world!.activity![coin].residents, spc: state.coins[coin].spc ?? 0,
+          }])),
+        }),
+      },
+    }] : []),
     ...ends.map(({ doc, status, exit }) => ({
       update: { name: doc.name, fields: encodeFields({ status, exit, exitSeq: seq, exitAt: new Stamp(atMs) }) },
       updateMask: { fieldPaths: ["status", "exit", "exitSeq", "exitAt"] }, currentDocument: { updateTime: doc.updateTime },
@@ -150,6 +230,10 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
   try {
     const times = await fs.commit(writes);
     recorder.state = state; recorder.hour = hour; recorder.minute = minute; recorder.candle = candle; recorder.hourUpdateTime = times[0] ?? null;
+    if (rateDoc && rate) {
+      recorder.config = { ...recorder.config, interestBps: rate.toBps };
+      options.events?.splice(options.events.indexOf(rateDoc), 1);
+    }
     if (options.news) {
       // Writes go [hour, ...feed, ...due, ...whispers, ...ends]; keep whispered news with its new updateTime.
       const whisperTimes = new Map(whispers.map((doc, index) => [doc.name, times[1 + feed.length + due.length + index] ?? doc.updateTime]));
@@ -164,6 +248,7 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     const fresh = await loadRecorder(fs, recorder.secret, atMs);
     Object.assign(recorder, fresh);
     const news = options.news ? await fs.query("marketNews", { status: "pending" }) : undefined;
+    if (options.events) options.events.splice(0, options.events.length, ...(await fs.query("marketEvents", { status: "pending" }).catch(() => [])));
     if (options.news && news) options.news.splice(0, options.news.length, ...news);
     return recordTick(recorder, atMs, { ...options, news: options.news }, false);
   }
@@ -180,7 +265,9 @@ export async function oracleToken(env: RecorderEnv): Promise<string> {
   return ((await response.json()) as { id_token: string }).id_token;
 }
 
-const FEED_TO_DISCORD = new Set(["news", "liberation", "houseOpen"]);
+const FEED_TO_DISCORD = new Set(["news", "liberation", "houseOpen", "earnings", "report", "rate"]);
+/** 거래소 2부: at most this many market posts a day (KST), so the channel does not drown. */
+const DISCORD_DAILY_MAX = 4;
 
 /** When the tick after `nowMs` is due (a little after the boundary, so its time is already past). */
 export function nextTickAt(nowMs: number, tickMs: number): number { return (Math.floor(nowMs / tickMs) + 1) * tickMs + 300; }
@@ -194,6 +281,8 @@ export class TickRunner {
   private recorder: Recorder | null = null;
   private token: { value: string; until: number } | null = null;
   private news: Doc[] = [];
+  private events: Doc[] = [];
+  private posted = { day: -1, count: 0 };
   private notify = normalizeNotify(undefined);
   private minuteChecked = -1;
   private worldChecked = -1;
@@ -211,12 +300,17 @@ export class TickRunner {
    */
   snapshot(): RunnerSnapshot {
     const { fs: _fs, secret: _secret, ...recorder } = this.recorder ?? ({} as Recorder);
-    return { token: this.token, recorder: this.recorder ? recorder : null, news: this.news, notify: this.notify, minuteChecked: this.minuteChecked, worldChecked: this.worldChecked };
+    return {
+      token: this.token, recorder: this.recorder ? recorder : null, news: this.news, events: this.events, notify: this.notify,
+      minuteChecked: this.minuteChecked, worldChecked: this.worldChecked, posted: this.posted,
+    };
   }
 
   restore(snapshot: RunnerSnapshot, nowMs: number): void {
     this.token = snapshot.token;
     this.news = snapshot.news;
+    this.events = snapshot.events ?? [];
+    this.posted = snapshot.posted ?? { day: -1, count: 0 };
     this.notify = snapshot.notify;
     this.minuteChecked = snapshot.minuteChecked;
     this.worldChecked = snapshot.worldChecked;
@@ -234,8 +328,12 @@ export class TickRunner {
     if (!this.recorder || minute !== this.minuteChecked) {
       if (!this.recorder) this.recorder = await loadRecorder(fs, this.env.MARKET_SECRET, nowMs);
       else this.recorder.config = normalizeMarket((await fs.get("config/market"))?.data);
-      const [news, notify] = await Promise.all([fs.query("marketNews", { status: "pending" }).catch(() => this.news), fs.get("config/notify").catch(() => null)]);
+      const [news, notify, events] = await Promise.all([
+        fs.query("marketNews", { status: "pending" }).catch(() => this.news), fs.get("config/notify").catch(() => null),
+        fs.query("marketEvents", { status: "pending" }).catch(() => this.events),
+      ]);
       this.news = news;
+      this.events = events;
       this.notify = normalizeNotify(notify?.data);
       this.minuteChecked = minute;
     }
@@ -244,13 +342,13 @@ export class TickRunner {
     if (!recorder.config.enabled) return null;
     const tickMs = recorder.config.tickSeconds * 1000, at = Math.floor(nowMs / tickMs) * tickMs;
     const tenth = Math.floor(minute / 10);
-    let world: WorldInput | undefined;
+    let world: World | undefined;
     if (recorder.state === null || tenth !== this.worldChecked) {
       // Prices keep moving even if the world read fails; it is tried again in ten minutes.
       world = await observeWorld(fs, at).catch((error) => { console.error("observe", error); return undefined; });
       this.worldChecked = tenth;
     }
-    const result = await recordTick(recorder, at, { world, news: this.news });
+    const result = await recordTick(recorder, at, { world, news: this.news, events: this.events });
     if (result.status === "written") await this.announce(result.feed);
     return result;
   }
@@ -261,7 +359,13 @@ export class TickRunner {
   }
 
   private async announce(feed: FeedItem[]): Promise<void> {
-    const lines = feed.filter((item) => FEED_TO_DISCORD.has(item.kind)).map((item) => `📈 **환전가 소식** ${item.coin ? `[${item.coin}] ` : ""}${item.text}`);
+    const day = Math.floor((Date.now() + 9 * 3_600_000) / 86_400_000);
+    if (this.posted.day !== day) this.posted = { day, count: 0 };
+    // Dealer news, liberations and the house always go out; earnings, reports and rates share a daily budget.
+    const always = feed.filter((item) => ["news", "liberation", "houseOpen"].includes(item.kind));
+    const budget = feed.filter((item) => FEED_TO_DISCORD.has(item.kind) && !always.includes(item)).slice(0, Math.max(0, DISCORD_DAILY_MAX - this.posted.count));
+    const lines = [...always, ...budget].map((item) => `📈 **환전가 소식** ${item.coin ? `[${item.coin}] ` : ""}${item.text}`);
+    if (lines.length && this.notify.enabled.market && this.env.DISCORD_WEBHOOK_URL) this.posted.count += budget.length;
     if (!lines.length || !this.notify.enabled.market || !this.env.DISCORD_WEBHOOK_URL) return;
     await this.post(this.env.DISCORD_WEBHOOK_URL, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -275,6 +379,8 @@ export interface RunnerSnapshot {
   recorder: Omit<Recorder, "fs" | "secret"> | null;
   news: Doc[];
   notify: ReturnType<typeof normalizeNotify>;
+  events?: Doc[];
+  posted?: { day: number; count: number };
   minuteChecked: number;
   worldChecked: number;
 }

@@ -107,6 +107,26 @@ export class FirestoreRest {
     return n ? Number(decode(n)) : 0;
   }
 
+  /**
+   * count(*) or sum(field) of `collection` matching equalities and timeField >= sinceMs
+   * (거래소 2부: resident activity, about one read per aggregation).
+   */
+  async aggregate(collection: string, equal: Record<string, unknown>, timeField: string, sinceMs: number, op: { count: true } | { sum: string }): Promise<number> {
+    const filters = [
+      ...Object.entries(equal).map(([field, value]) => ({ fieldFilter: { field: { fieldPath: field }, op: "EQUAL", value: encode(value) } })),
+      { fieldFilter: { field: { fieldPath: timeField }, op: "GREATER_THAN_OR_EQUAL", value: encode(new Stamp(sinceMs)) } },
+    ];
+    const structuredAggregationQuery = {
+      structuredQuery: { from: [{ collectionId: collection }], where: { compositeFilter: { op: "AND", filters } } },
+      aggregations: [{ alias: "n", ...("count" in op ? { count: {} } : { sum: { field: { fieldPath: op.sum } } }) }],
+    };
+    const response = await fetch(`${this.base}:runAggregationQuery`, { method: "POST", headers: this.headers(), body: JSON.stringify({ structuredAggregationQuery }) });
+    if (!response.ok) throw new Error(`firestore_aggregate_${response.status}: ${(await response.text()).slice(0, 300)}`);
+    const rows = (await response.json()) as { result?: { aggregateFields?: { n?: Value } } }[];
+    const n = rows[0]?.result?.aggregateFields?.n;
+    return n ? Number(decode(n)) : 0;
+  }
+
   /** Atomic multi-write. Throws CommitConflict when a precondition fails. Returns each write's updateTime. */
   async commit(writes: Write[]): Promise<string[]> {
     const response = await fetch(`${this.base}:commit`, { method: "POST", headers: this.headers(), body: JSON.stringify({ writes }) });

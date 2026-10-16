@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getDoc, limit, orderBy, query, where, type Timestamp } from "firebase/firestore";
-import { COIN_IDS, DEFAULT_MARKET, hourIndexAt, normalizeMarket, type CoinId, type HourDoc, type MarketConfig, type TickDoc } from "@fortuna/core";
+import { collection, doc, getDoc, limit, orderBy, query, where, type CollectionReference, type DocumentReference, type Timestamp } from "firebase/firestore";
+import { COIN_IDS, DEFAULT_MARKET, hourIndexAt, normalizeMarket, type CoinId, type FundamentalsDoc, type HourDoc, type MarketConfig, type RateEventDoc, type ReportDoc, type TickDoc } from "@fortuna/core";
 import { refs, settleEndedPositions, type FeedDoc, type HoldingDoc, type PositionDoc } from "@fortuna/data";
 import { db } from "../firebase.ts";
 import { usePlayer } from "../session/player.tsx";
@@ -135,4 +135,34 @@ export function useMyHoldings(): Row<HoldingDoc>[] {
   const { session } = usePlayer();
   const live = useLiveQuery(query(refs.holdings(db), where("playerId", "==", session.pid)), `holdings:${session.pid}`);
   return useMemo(() => (live.status === "ready" ? live.data.filter((row) => row.data.units > 0) : []), [live]);
+}
+
+// ── 거래소 2부 2단계: 실적·리포트·금리 결정 ──
+
+export function useFundamentals(): FundamentalsDoc<Timestamp> | null {
+  const live = useLiveDoc(doc(db, "market", "fundamentals") as DocumentReference<FundamentalsDoc<Timestamp>>, "market:fundamentals");
+  return live.status === "ready" ? live.data : null;
+}
+
+/** The latest reports (a few weeks of them), newest first. */
+export function useReports(count = 40): ReportDoc<Timestamp>[] {
+  const live = useLiveQuery(query(collection(db, "marketReports") as CollectionReference<ReportDoc<Timestamp>>, orderBy("at", "desc"), limit(count)), `reports:${count}`);
+  return useMemo(() => (live.status === "ready" ? live.data.map((row) => row.data) : []), [live]);
+}
+
+/** Rate decisions announced and not yet applied. */
+export function useRateEvents(): Row<RateEventDoc<Timestamp>>[] {
+  const live = useLiveQuery(query(collection(db, "marketEvents") as CollectionReference<RateEventDoc<Timestamp>>, where("status", "==", "pending")), "marketEvents:pending");
+  return live.status === "ready" ? live.data : [];
+}
+
+/** Latest report per coin, with that writer's hit record. */
+export function latestReports(reports: readonly ReportDoc<Timestamp>[]): Map<CoinId, { report: ReportDoc<Timestamp>; hits: number; scored: number }> {
+  const out = new Map<CoinId, { report: ReportDoc<Timestamp>; hits: number; scored: number }>();
+  for (const report of reports) {
+    const entry = out.get(report.coin) ?? { report, hits: 0, scored: 0 };
+    if (report.prev) { entry.scored += 1; if (report.prev.hit) entry.hits += 1; }
+    out.set(report.coin, entry);
+  }
+  return out;
 }

@@ -121,7 +121,7 @@ export async function seedPlayers(names: string[]): Promise<string[]> {
 export async function startRecorder(everyMs = 1_000): Promise<{ stop: () => Promise<void>; recorder: import("../apps/notifier/src/oracle.ts").Recorder; tick: () => Promise<unknown> }> {
   const { signInAnonymously } = await import("firebase/auth");
   const { FirestoreRest } = await import("../apps/notifier/src/firestore-rest.ts");
-  const { loadRecorder, recordTick } = await import("../apps/notifier/src/oracle.ts");
+  const { loadRecorder, observeWorld, recordTick } = await import("../apps/notifier/src/oracle.ts");
   const app = initializeApp({ projectId: PROJECT, apiKey: "demo-key", authDomain: `${PROJECT}.firebaseapp.com` }, `oracle-${Date.now()}`);
   const auth = getAuth(app);
   connectAuthEmulator(auth, `http://${AUTH}`, { disableWarnings: true });
@@ -134,7 +134,9 @@ export async function startRecorder(everyMs = 1_000): Promise<{ stop: () => Prom
   let at = Math.floor(Date.now() / 15_000) * 15_000 - 30_000;
   const recorder = await loadRecorder(rest, "e2e-secret", at);
   const tick = async () => { at += 15_000; return recordTick(recorder, at); };
-  await tick();
+  // The first tick also observes the city, so market/fundamentals exists (거래소 2부).
+  at += 15_000;
+  await recordTick(recorder, at, { world: await observeWorld(rest, at) });
   let running = true;
   const loop = (async () => { while (running) { await new Promise((resolve) => setTimeout(resolve, everyMs)); if (running) await tick().catch(() => undefined); } })();
   return {

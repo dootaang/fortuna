@@ -1,13 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getAuth } from "firebase/auth";
 import { deleteField, doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
-import { DEFAULT_MARKET, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, weekIndexAt, type CoinId } from "@fortuna/core";
+import { DEFAULT_MARKET, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, reportAt, weekIndexAt, type CoinId } from "@fortuna/core";
 import {
-  announceBossFight, arrive, buySpot, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
+  announceBossFight, arrive, buySpot, scheduleRate, cancelRate, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
   type PlayerSession, type Session,
 } from "@fortuna/data";
 import { FirestoreRest } from "../../../apps/notifier/src/firestore-rest.ts";
-import { TickRunner, loadRecorder, nextTickAt, recordTick, type Recorder } from "../../../apps/notifier/src/oracle.ts";
+import { TickRunner, loadRecorder, nextTickAt, observeWorld, recordTick, type Recorder } from "../../../apps/notifier/src/oracle.ts";
 import { anonymousSession, asRoot, cityWithPlayer, closeAll, resetData, rootData } from "./harness.ts";
 
 const denied = async (promise: Promise<unknown>) => { await expect(promise).rejects.toMatchObject({ code: "permission-denied" }); };
@@ -338,6 +338,40 @@ describe("weekly profit cap (환전가 특별 징수)", () => {
     const sold = await sellSpot(player, "ORB", bought.quote.units);
     expect(sold.levy).toBe(0);
     expect((await rootData(`wallets/${player.pid}`))!.marketWeek.net).toBe(sold.quote.payout - sold.quote.costOut);
+  });
+});
+
+describe("earnings, reports and rate decisions (거래소 2부 2단계)", () => {
+  it("publishes fundamentals with resident activity and applies an announced rate decision", async () => {
+    const rest = await oracleRest(oracle);
+    const eventId = await scheduleRate(admin, Date.now() - 1_000, 25);
+    const cancelled = await scheduleRate(admin, Date.now() + 3_600_000, 40);
+    await cancelRate(admin, cancelled);
+    const events = await rest.query("marketEvents", { status: "pending" });
+    expect(events.map((doc) => doc.id)).toEqual([eventId]);
+    const world = await observeWorld(rest, clockMs + 15_000);
+    expect(world.activity?.FTN.residents).toBe(1);
+    const result = await tick({ world, events });
+    expect(result.feed.some((item) => item.kind === "rate")).toBe(true);
+    expect((await rootData("config/market"))!.interestBps).toBe(25);
+    expect(await rootData(`marketEvents/${eventId}`)).toMatchObject({ status: "done" });
+    const fundamentals = (await rootData("market/fundamentals"))!;
+    expect(Object.keys(fundamentals.coins)).toHaveLength(9);
+    expect(typeof fundamentals.coins.LNH.mood).toBe("number");
+    // Nobody else changes the rate: not a player, not the recorder without an announced decision.
+    await denied(updateDoc(doc(player.db, "config", "market"), { interestBps: 1 }));
+    await denied(updateDoc(doc(oracle.db, "config", "market"), { interestBps: 1, lastRate: eventId }));
+  });
+
+  it("writes an analyst report the day after an announcement, once", async () => {
+    const week = weekIndexAt(Date.now()) + 1, due = reportAt("LNH", week);
+    clockMs = Math.max(clockMs, due - 5_000);
+    await tick();
+    const report = (await rootData(`marketReports/${week}_LNH`))!;
+    expect(report).toMatchObject({ coin: "LNH", week, writer: "마왕성 서기관", prev: null });
+    expect(report.low).toBeLessThan(report.mid);
+    await tick();
+    await denied(setDoc(doc(player.db, "marketReports", `${week}_S9`), { coin: "S9" }));
   });
 });
 

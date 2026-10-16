@@ -54,7 +54,7 @@ describe("crowd", () => {
     const ticks = 2 * 24 * 240;
     for (let index = 1; index <= ticks; index += 1) {
       const atMs = start + index * TICK * 1000, seq = tickSeq(atMs, TICK), keys = seedKeys(seq, atMs, TICK);
-      state = stepMarket(state, { seq, atMs, seeds: { tick: marketSeed(SECRET, keys.tick), blcNow: 1, blcPast: 1, s9Week: 1 }, config }).state;
+      state = stepMarket(state, { seq, atMs, seeds: { tick: marketSeed(SECRET, keys.tick), blcNow: marketSeed(SECRET, keys.blcNow), blcPast: marketSeed(SECRET, keys.blcPast), s9Week: marketSeed(SECRET, keys.s9Week) }, config }).state;
       for (const id of COIN_IDS) {
         const crowd = state.coins[id].npc!;
         if (crowd.lr <= 0.2 || crowd.lr >= 0.8) pinned[id] = (pinned[id] ?? 0) + 1;
@@ -133,4 +133,101 @@ describe("chart indicators", () => {
     expect(rsi(zigzag, 14)[59]).toBeLessThan(60);
     expect(rsi(zigzag, 14)[5]).toBeNull();
   });
+});
+
+describe("earnings (2단계)", () => {
+  it("announces each coin once a week at 21:00 KST, prices in hints, moves the anchor and stays bounded for 13 weeks", async () => {
+    const { earningsAt, fundamentalsInput, weekIndexAt, consensus, COINS } = await import("../src/index.ts");
+    const start = Date.UTC(2026, 9, 11, 15, 0); // Monday 00:00 KST
+    const week0 = weekIndexAt(start);
+    expect(earningsAt("HBT", week0)).toBe(start + 21 * 3_600_000);
+    expect(earningsAt("FTN", week0)).toBe(start + 6 * 86_400_000 + 21 * 3_600_000);
+    const cache = new Map<string, number>(), sign = (key: string) => { if (!cache.has(key)) cache.set(key, marketSeed(SECRET, key)); return cache.get(key)!; };
+    const tick = 60; // coarser ticks keep the 13-week run quick; the engine steps by elapsed time
+    let state = initialMarketState(tickSeq(start, tick), start), feeds = 0;
+    const weeks = 13, steps = (weeks * 7 * 86_400) / tick;
+    let maxPre = 0;
+    for (let index = 1; index <= steps; index += 1) {
+      const atMs = start + index * tick * 1000, seq = state.seq + 1, keys = seedKeys(seq, atMs, tick);
+      const stepped = stepMarket(state, {
+        seq, atMs, seeds: { tick: marketSeed(SECRET, keys.tick), blcNow: marketSeed(SECRET, keys.blcNow), blcPast: marketSeed(SECRET, keys.blcPast), s9Week: marketSeed(SECRET, keys.s9Week) }, config: { ...DEFAULT_MARKET, tickSeconds: tick },
+        fundamentals: fundamentalsInput(sign, atMs),
+      });
+      state = stepped.state;
+      feeds += stepped.feed.filter((item) => item.kind === "earnings").length;
+      for (const id of COIN_IDS) maxPre = Math.max(maxPre, Math.abs(state.coins[id].pre ?? 0));
+    }
+    expect(feeds).toBe(weeks * COIN_IDS.length);
+    expect(maxPre).toBeLessThanOrEqual(0.06 + 1e-9);
+    for (const id of COIN_IDS) {
+      const coin = state.coins[id];
+      expect(coin.eh).toHaveLength(4);
+      expect(coin.ff).toBeGreaterThanOrEqual(0.8);
+      expect(coin.ff).toBeLessThanOrEqual(1.3);
+      expect(coin.p).toBeGreaterThan(COINS[id].anchor / 50);
+      expect(coin.p).toBeLessThan(COINS[id].anchor * 50);
+      expect(Math.abs(consensus(coin.eh))).toBeLessThan(0.36);
+    }
+  }, 120_000);
+
+  it("measures resident activity against an ordinary week, capping the players' share at ±6%", async () => {
+    const { activityRatio, playerShare, heatShare, rateShock, weekCalendar, analystBand, moodWords } = await import("../src/index.ts");
+    expect(activityRatio({ work: 35, repay: 300, skill: 2, residents: 1 })).toBe(1);
+    expect(activityRatio({ work: 0, repay: 0, skill: 0, residents: 0 })).toBeNull();
+    expect(playerShare(1.4)).toBeCloseTo(0.024);
+    expect(playerShare(5)).toBe(0.06);
+    expect(playerShare(null)).toBe(0);
+    expect(heatShare(1.1)).toBeCloseTo(0.06);
+    expect(rateShock("FTN", 5)).toBeCloseTo(0.98);
+    expect(rateShock("HBT", 5)).toBeCloseTo(0.974);
+    const week = 2_962, calendar = weekCalendar(week, [{ atMs: Date.UTC(2026, 9, 14, 3), bps: 25 }]);
+    expect(calendar.filter((item) => item.kind === "earnings")).toHaveLength(9);
+    expect(calendar.some((item) => item.kind === "rate")).toBe(true);
+    expect(analystBand("FTN", 100_000, 100_000, 0, 1)).toBeNull();
+    const band = analystBand("LNH", 12_000, 12_000, 0, 7)!;
+    expect(band.low).toBeLessThan(band.mid);
+    expect(band.high).toBeGreaterThan(band.mid);
+    expect(moodWords(0.2)).toContain("아주 좋다");
+  });
+});
+
+describe("balance (원칙 4)", () => {
+  it("keeps the hint reader under 103% and a blind bettor near the house edge", async () => {
+    const { earningsAt, fundamentalsInput, weekIndexAt, quoteOpen, quoteClose } = await import("../src/index.ts");
+    const start = Date.UTC(2026, 9, 11, 15, 0), tick = 60, weeks = 26;
+    const cache = new Map<string, number>(), sign = (key: string) => { if (!cache.has(key)) cache.set(key, marketSeed(SECRET + "b", key)); return cache.get(key)!; };
+    let state = initialMarketState(tickSeq(start, tick), start);
+    type Bet = { coin: CoinId; side: "long" | "short"; entry: number; openedAtMs: number; closeAt: number; fee: number; blind: boolean };
+    const open: Bet[] = [], paid = { reader: 0, blind: 0 }, cost = { reader: 0, blind: 0 };
+    let flip = 0;
+    for (let index = 1; index <= (weeks * 7 * 86_400) / tick; index += 1) {
+      const atMs = start + index * tick * 1000, seq = state.seq + 1, keys = seedKeys(seq, atMs, tick);
+      const fundamentals = fundamentalsInput(sign, atMs);
+      state = stepMarket(state, { seq, atMs, seeds: { tick: marketSeed(SECRET, keys.tick), blcNow: marketSeed(SECRET, keys.blcNow), blcPast: marketSeed(SECRET, keys.blcPast), s9Week: marketSeed(SECRET, keys.s9Week) }, config: { ...DEFAULT_MARKET, tickSeconds: tick }, fundamentals }).state;
+      for (const coin of COIN_IDS) {
+        const due = earningsAt(coin, weekIndexAt(atMs));
+        if (due - atMs > 3_540_000 && due - atMs <= 3_600_000) {
+          const read = fundamentals.mood[coin] + (state.coins[coin].spc ?? 0);
+          const price = state.coins[coin].p;
+          if (Math.abs(read) > 0.1) open.push({ coin, side: read > 0 ? "long" : "short", entry: price, openedAtMs: atMs, closeAt: due + 3_600_000, fee: quoteOpen(DEFAULT_MARKET, coin, "long", 5, 100, price).fee, blind: false });
+          open.push({ coin, side: flip++ % 2 ? "long" : "short", entry: price, openedAtMs: atMs, closeAt: due + 3_600_000, fee: quoteOpen(DEFAULT_MARKET, coin, "long", 5, 100, price).fee, blind: true });
+        }
+      }
+      for (let i = open.length - 1; i >= 0; i -= 1) {
+        const bet = open[i]!, price = state.coins[bet.coin].p;
+        const liq = bet.side === "long" ? price <= bet.entry * (1 - 0.9 / 5) : price >= bet.entry * (1 + 0.9 / 5);
+        if (atMs < bet.closeAt && !liq) continue;
+        const quote = quoteClose(DEFAULT_MARKET, { coin: bet.coin, side: bet.side, leverage: 5, margin: 100, fee: bet.fee, entry: bet.entry, openedAtMs: bet.openedAtMs }, liq ? "liquidated" : "close", price, atMs);
+        const who = bet.blind ? "blind" : "reader";
+        paid[who] += quote.payout; cost[who] += 100 + bet.fee;
+        open.splice(i, 1);
+      }
+    }
+    const reader = paid.reader / cost.reader, blind = paid.blind / cost.blind;
+    expect(cost.reader).toBeGreaterThan(0);
+    expect(reader).toBeLessThan(1.03);
+    expect(blind).toBeGreaterThan(0.9);
+    expect(blind).toBeLessThan(1.0);
+    console.info(`balance: hint reader ${(reader * 100).toFixed(1)}%, blind ${(blind * 100).toFixed(1)}%`);
+  }, 180_000);
 });

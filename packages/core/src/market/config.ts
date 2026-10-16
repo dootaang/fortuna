@@ -52,6 +52,8 @@ export interface MarketConfig {
   weeklyProfitCap: number;
   /** NPC 거래자 (docs/SPEC-MARKET-DEPTH.md 2-0): on/off and size multiplier. No coins move. */
   npc: { enabled: boolean; scale: number };
+  /** 거래소 2부 2단계: weekly district earnings, hints, reports. */
+  earnings: boolean;
 }
 
 export const DEFAULT_MARKET: MarketConfig = {
@@ -75,6 +77,7 @@ export const DEFAULT_MARKET: MarketConfig = {
   coins: Object.fromEntries(COIN_IDS.map((id) => [id, { enabled: true, volMult: 1, paused: false }])) as MarketConfig["coins"],
   weeklyProfitCap: 5_000,
   npc: { enabled: true, scale: 1 },
+  earnings: true,
 };
 
 const int = (value: unknown, fallback: number, min = 0, max = 1e9) => Math.round(numberOr(value, fallback, min, max));
@@ -115,6 +118,7 @@ export function normalizeMarket(raw: unknown): MarketConfig {
     })) as MarketConfig["coins"],
     weeklyProfitCap: int(source.weeklyProfitCap, d.weeklyProfitCap, 0, 1e9),
     npc: { enabled: bool(npc.enabled, d.npc.enabled), scale: numberOr(npc.scale, d.npc.scale, 0, 5) },
+    earnings: bool(source.earnings, d.earnings),
   };
 }
 

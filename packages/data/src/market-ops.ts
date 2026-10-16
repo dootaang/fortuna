@@ -1,4 +1,4 @@
-import { Timestamp, addDoc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Firestore, type Transaction } from "firebase/firestore";
+import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Firestore, type Transaction } from "firebase/firestore";
 import {
   COINS, DEFAULT_MARKET, HOUR_MS, KST_OFFSET_MS, entryPaused, weekIndexAt, weeklyLevy, hourIndexAt, leverageChoices, normalizeMarket, periodWords, quoteBuy, quoteClose, quoteOpen, quoteSell,
   type BuyQuote, type CloseKind, type SellQuote, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
@@ -275,3 +275,18 @@ export async function registerOracle(session: Session, uid: string): Promise<voi
 }
 
 export type { HourDoc };
+
+// ── 거래소 2부: 지배인 금리 결정 ──
+
+/** Announce a rate decision: it shows on the calendar now and moves prices when it lands. */
+export async function scheduleRate(session: Session, atMs: number, bps: number): Promise<string> {
+  if (!Number.isInteger(bps) || bps < 0 || bps > 1_000) throw new FortunaError("bps", "이자율은 0~1000bp 사이 정수로 적어 주십시오.");
+  if (!Number.isFinite(atMs) || atMs < session.clock.now() - 60_000) throw new FortunaError("at", "발표 시각을 확인해 주십시오.");
+  const ref = await addDoc(collection(session.db, "marketEvents"), { kind: "rate", bps, at: Timestamp.fromMillis(atMs), status: "pending", appliedSeq: null, createdAt: serverTimestamp() });
+  await adminLog(session, "rate", "FTN", bps, `금리 결정 예고 ${new Date(atMs).toISOString()}`);
+  return ref.id;
+}
+
+export async function cancelRate(session: Session, id: string): Promise<void> {
+  await updateDoc(doc(session.db, "marketEvents", id), { status: "cancelled" });
+}

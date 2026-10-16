@@ -73,6 +73,17 @@ service cloud.firestore {
     match /config/{name} {
       allow read: if signedIn();
       allow write: if isAdmin();
+      // 지배인 금리 결정: 기록원은 예고된 결정이 발표되는 순간 그 이자율만 바꾼다(거래소 2부 4-5).
+      allow update: if name == 'market' && isOracle()
+        && onlyChanged(resource.data, request.resource.data, ['interestBps', 'lastRate'])
+        && rateApplied(request.resource.data.lastRate, request.resource.data.interestBps);
+    }
+
+    function rateApplied(eventId, bps) {
+      let before = get(/databases/$(database)/documents/marketEvents/$(eventId)).data;
+      let after = getAfter(/databases/$(database)/documents/marketEvents/$(eventId)).data;
+      return eventId is string && before.kind == 'rate' && before.status == 'pending' && after.status == 'done'
+        && before.bps == bps && before.at <= request.time;
     }
 
     match /districts/{id} {
@@ -122,7 +133,8 @@ service cloud.firestore {
     }
 
     match /players/{pid} {
-      allow read: if isAdmin() || isPlayer(pid);
+      // 기록원은 구역 주민 활동을 세려고 주민 구역을 읽는다(거래소 2부 4-1).
+      allow read: if isAdmin() || isPlayer(pid) || isOracle();
       allow write: if isAdmin();
     }
 
@@ -734,6 +746,24 @@ service cloud.firestore {
       allow read: if isAdmin() || isOracle();
       allow create, delete: if isAdmin();
       allow update: if isAdmin() || (isOracle() && onlyChanged(resource.data, request.resource.data, ['status', 'publishedSeq', 'whispered']));
+    }
+
+    // 거래소 2부: 애널리스트 리포트(기록원이 쓴다)와 딜러가 예고하는 금리 결정.
+    match /marketReports/{id} {
+      allow read: if signedIn();
+      allow create: if isOracle();
+      allow update, delete: if isAdmin();
+    }
+
+    match /marketEvents/{id} {
+      allow read: if signedIn();
+      allow create: if isAdmin() && request.resource.data.kind == 'rate' && request.resource.data.status == 'pending'
+        && request.resource.data.bps is int && request.resource.data.bps >= 0 && request.resource.data.bps <= 1000
+        && request.resource.data.at is timestamp;
+      allow delete: if isAdmin() && resource.data.status == 'pending';
+      allow update: if (isAdmin() && onlyChanged(resource.data, request.resource.data, ['status']) && request.resource.data.status == 'cancelled')
+        || (isOracle() && resource.data.status == 'pending' && onlyChanged(resource.data, request.resource.data, ['status', 'appliedSeq'])
+            && request.resource.data.status == 'done' && request.resource.data.appliedSeq is int);
     }
 
     function positionPath(id) { return /databases/$(database)/documents/positions/$(id); }
