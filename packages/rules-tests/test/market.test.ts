@@ -430,6 +430,9 @@ describe("funding (거래소 2부 5단계)", () => {
     await saveMarket(admin, { ...DEFAULT_MARKET, weeklyProfitCap: 1 });
     const long = await openPosition(player, { coin: "FTN", side: "long", leverage: 5, margin: 200 });
     const short = await openPosition(player, { coin: "FTN", side: "short", leverage: 5, margin: 200 });
+    // A short closed before the index moves owes 0 funding (an integer, not -0).
+    const quick = await openPosition(player, { coin: "FTN", side: "short", leverage: 5, margin: 100 });
+    expect((await closePosition(player, quick.positionId)).quote.funding).toBe(0);
     expect((await rootData(`positions/${long.positionId}`))!.F0).toBe(0);
     await tick();
     await fund("FTN", 1_000); // +0.1%: longs pay, shorts receive

@@ -324,6 +324,7 @@ describe("funding and cascades (5단계)", () => {
     expect(fundingPpm(1e9, 0)).toBeLessThanOrEqual(1_000);
     expect(fundingFor(2_000, "long", 0, 1_000)).toBe(2);
     expect(fundingFor(2_000, "short", 0, 1_000)).toBe(-2);
+    expect(fundingFor(2_000, "short", 135, 135)).toBe(0); // +0, not -0: Firestore would store -0 as a double
     expect(fundingFor(2_000, "long", null, 1_000)).toBe(0);
     expect(fundingDue(Date.UTC(2026, 9, 1, 3, 59, 50), Date.UTC(2026, 9, 1, 4, 0, 0))).toBe(true);
     const book = Object.fromEntries(COIN_IDS.map((id) => [id, [20_000, 10_000]])) as Record<CoinId, [number, number]>;

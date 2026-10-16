@@ -13,7 +13,8 @@ export function floorDiv(a: number, b: number): number {
   let q = Math.floor(a / b);
   while (q * b > a) q -= 1;
   while ((q + 1) * b <= a) q += 1;
-  return q;
+  // -0 (a short's funding with an unmoved index) would reach Firestore as a double, which the rules' `is int` refuses.
+  return q === 0 ? 0 : q;
 }
 
 export function tradeFee(notional: number, config: Pick<MarketConfig, "feeBps" | "minFee">): number {
