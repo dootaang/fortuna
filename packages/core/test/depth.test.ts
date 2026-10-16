@@ -350,3 +350,20 @@ describe("funding and cascades (5단계)", () => {
     // Player positions never enter cascadeMove: it takes the crowd's step only (see engine).
   });
 });
+
+describe("dividends (6단계)", () => {
+  it("pays 1% a week of the holding times the earnings multiplier, double when liberated, capped at 200 a week", async () => {
+    const { dividendFor, dividendMultiplier, creditClaim } = await import("../src/index.ts");
+    expect(dividendFor(2_000, 0, false)).toBe(20);
+    expect(dividendFor(2_000, 0, true)).toBe(40);
+    expect(dividendFor(2_000, 0.2, false)).toBe(24);
+    expect(dividendMultiplier(-0.9)).toBe(0.5);
+    expect(dividendMultiplier(0.9)).toBe(1.5);
+    expect(dividendFor(0, 0, false)).toBe(0);
+    const first = creditClaim(null, "LNH", 150);
+    expect(first).toEqual({ items: { LNH: 150 }, total: 150, added: 150 });
+    const second = creditClaim(first, "HBT", 120);
+    expect(second).toEqual({ items: { LNH: 150, HBT: 50 }, total: 200, added: 50 });
+    expect(creditClaim(second, "S9", 10).added).toBe(0);
+  });
+});

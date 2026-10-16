@@ -3,12 +3,13 @@ import { Link } from "react-router";
 import { COINS, COIN_IDS, entryPaused, periodWords, weekCalendar, weekIndexAt, type CoinId } from "@fortuna/core";
 import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
-import { Frame, Notice, PageTitle, cx, formatDate } from "../ui/kit.tsx";
+import { Coins, Frame, Notice, PageTitle, cx, formatDate, useAction, useToast } from "../ui/kit.tsx";
+import { claimDividend } from "@fortuna/data";
 import { VenueTabs } from "../pages/VenueList.tsx";
 import { PositionCard } from "./Positions.tsx";
 import { HoldingsList } from "./HoldingsList.tsx";
 import { CoinBadge, FearGreedGauge, FlapText, LongShortBar, Sparkline, changeText, priceText } from "./pieces.tsx";
-import { directionOf, openingPrice, useCountdown, useFeed, useMarketConfig, useMyPositions, useRateEvents, useTape } from "./useMarket.ts";
+import { directionOf, openingPrice, useCountdown, useDividendClaims, useFeed, useMarketConfig, useMyPositions, useRateEvents, useTape } from "./useMarket.ts";
 import "./market.css";
 
 /** 환전가 거래소: the departure board of prices. */
@@ -69,6 +70,8 @@ export default function MarketPage() {
             </ul>
           </section>
 
+          <DividendCard />
+
           <Link to="/market/info" className="deco-frame mb-4 flex items-center justify-between gap-2 px-3 py-2 text-sm">
             <span>
               <span className="deco-caps mr-2 text-[0.6rem]">시장 정보</span>
@@ -113,6 +116,34 @@ export default function MarketPage() {
         </>
       )}
     </div>
+  );
+}
+
+/** 배당 도착: what the recorder credited at the last announcements, collected into the wallet. */
+function DividendCard() {
+  const { session } = usePlayer();
+  const claims = useDividendClaims();
+  const { busy, run } = useAction();
+  const toast = useToast();
+  if (!claims.length) return null;
+  const total = claims.reduce((sum, row) => sum + row.data.total - row.data.claimed, 0);
+  const coins = [...new Set(claims.flatMap((row) => Object.keys(row.data.items)))].join(" · ");
+  return (
+    <Frame className="mb-4 !border-gold-300">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="deco-caps text-[0.6rem]">Dividend</p>
+          <p className="font-bold">배당 도착 <Coins value={total} /></p>
+          <p className="text-xs text-mist">{coins} 실적 발표 때 들고 있던 현물 몫 (한 주 최대 200코인)</p>
+        </div>
+        <button type="button" className="btn btn-gold btn-sm shrink-0" disabled={busy} onClick={() => void run(async () => {
+          let got = 0;
+          for (const row of claims) got += (await claimDividend(session, row.id)).amount;
+          cue("chip");
+          toast("success", `배당 ${got.toLocaleString("ko-KR")}코인을 받았습니다.`);
+        })}>받기</button>
+      </div>
+    </Frame>
   );
 }
 

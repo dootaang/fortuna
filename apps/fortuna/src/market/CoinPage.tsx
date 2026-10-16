@@ -10,7 +10,7 @@ import { ChartBoundary, INDICATORS, PriceChart, type ChartFlag, type ChartLine, 
 import { PositionCard } from "./Positions.tsx";
 import { SpotPanel } from "./SpotPanel.tsx";
 import { CoinBadge, FlapText, LiquidationMap, LongShortBar, changeText, priceText } from "./pieces.tsx";
-import { directionOf, latestReports, openingPrice, useCountdown, useFeed, useFundamentals, useMarketConfig, useMyPositions, useReports, useTape } from "./useMarket.ts";
+import { directionOf, latestReports, openingPrice, useCountdown, useFeed, useFundamentals, useMarketConfig, useMyHoldings, useMyPositions, useReports, useTape } from "./useMarket.ts";
 import "./market.css";
 
 const INDICATOR_KEY = "fortuna:market:indicators";
@@ -51,6 +51,8 @@ function CoinView({ coin }: { coin: CoinId }) {
   }
   const fx = tick?.fx;
   const fundamentals = useFundamentals();
+  const held = useMyHoldings().find((row) => row.data.coin === coin)?.data.units ?? 0;
+  const perk = market.perks[coin];
   const report = latestReports(useReports(20)).get(coin);
   const earned = tick?.st.coins[coin].eh ?? [];
 
@@ -75,6 +77,9 @@ function CoinView({ coin }: { coin: CoinId }) {
         </div>
       </header>
       <p className="mb-3 text-sm text-mist">{def.trait}</p>
+      {perk && held >= perk.minUnits && (
+        <p className="deco-frame mb-3 px-3 py-2 text-sm text-gold-200"><span className="deco-caps mr-2 text-[0.6rem]">보유 특전</span>{perk.text}</p>
+      )}
 
       <Frame className="mb-4 !p-2">
         <div className="mb-2 flex gap-1" role="tablist" aria-label="봉 단위">

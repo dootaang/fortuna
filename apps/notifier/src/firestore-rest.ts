@@ -108,16 +108,14 @@ export class FirestoreRest {
   }
 
   /**
-   * count(*) or sum(field) of `collection` matching equalities and timeField >= sinceMs
+   * count(*) or sum(field) of `collection` matching equalities
    * (거래소 2부: resident activity, about one read per aggregation).
    */
-  async aggregate(collection: string, equal: Record<string, unknown>, timeField: string, sinceMs: number, op: { count: true } | { sum: string }): Promise<number> {
-    const filters = [
-      ...Object.entries(equal).map(([field, value]) => ({ fieldFilter: { field: { fieldPath: field }, op: "EQUAL", value: encode(value) } })),
-      { fieldFilter: { field: { fieldPath: timeField }, op: "GREATER_THAN_OR_EQUAL", value: encode(new Stamp(sinceMs)) } },
-    ];
+  async aggregate(collection: string, equal: Record<string, unknown>, op: { count: true } | { sum: string }): Promise<number> {
+    // Equality filters only: Firestore serves them by merging single-field indexes, so no composite index is needed.
+    const filters = Object.entries(equal).map(([field, value]) => ({ fieldFilter: { field: { fieldPath: field }, op: "EQUAL", value: encode(value) } }));
     const structuredAggregationQuery = {
-      structuredQuery: { from: [{ collectionId: collection }], where: { compositeFilter: { op: "AND", filters } } },
+      structuredQuery: { from: [{ collectionId: collection }], where: filters.length === 1 ? filters[0] : { compositeFilter: { op: "AND", filters } } },
       aggregations: [{ alias: "n", ...("count" in op ? { count: {} } : { sum: { field: { fieldPath: op.sum } } }) }],
     };
     const response = await fetch(`${this.base}:runAggregationQuery`, { method: "POST", headers: this.headers(), body: JSON.stringify({ structuredAggregationQuery }) });

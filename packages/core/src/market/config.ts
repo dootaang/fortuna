@@ -61,6 +61,10 @@ export interface MarketConfig {
   /** 5단계: hourly funding on futures, and crowd liquidation cascades. */
   funding: boolean;
   cascade: boolean;
+  /** 6단계: dividends to spot holders at each earnings announcement. */
+  dividends: boolean;
+  /** 6-4 보유 특전: a line shown to holders of at least `minUnits` (1/10,000 coin), per coin; dealer-written. */
+  perks: Partial<Record<CoinId, { minUnits: number; text: string }>>;
 }
 
 export const DEFAULT_MARKET: MarketConfig = {
@@ -89,6 +93,8 @@ export const DEFAULT_MARKET: MarketConfig = {
   regimes: true,
   funding: true,
   cascade: true,
+  dividends: true,
+  perks: {},
 };
 
 const int = (value: unknown, fallback: number, min = 0, max = 1e9) => Math.round(numberOr(value, fallback, min, max));
@@ -134,6 +140,11 @@ export function normalizeMarket(raw: unknown): MarketConfig {
     regimes: bool(source.regimes, d.regimes),
     funding: bool(source.funding, d.funding),
     cascade: bool(source.cascade, d.cascade),
+    dividends: bool(source.dividends, d.dividends),
+    perks: Object.fromEntries(COIN_IDS.flatMap((id) => {
+      const perk = isRecord(source.perks) && isRecord(source.perks[id]) ? source.perks[id] : null;
+      return perk && typeof perk.text === "string" && perk.text.trim() ? [[id, { minUnits: int(perk.minUnits, 10_000, 1), text: perk.text.trim().slice(0, 200) }]] : [];
+    })) as MarketConfig["perks"],
   };
 }
 

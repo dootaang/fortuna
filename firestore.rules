@@ -231,6 +231,7 @@ service cloud.firestore {
         || (e.type == 'marketClose' && marketCloseOk(entryId, e, before, after))
         || (e.type == 'spotBuy' && spotBuyOk(entryId, e, before, after))
         || (e.type == 'spotSell' && spotSellOk(entryId, e, before, after))
+        || (e.type == 'dividend' && dividendOk(entryId, e, before, after))
       );
     }
 
@@ -967,6 +968,36 @@ service cloud.firestore {
     }
     function entryOpen(m, coin, tick) {
       return m.coins[coin].get('paused', false) != true || coinDistrict(coin) in tick.st.liberated;
+    }
+
+    // ── 배당 (거래소 2부 6단계) ── 기록원이 실적 발표 때 명세를 쓰고, 플레이어가 장부로 받는다. 한 주 200코인 상한.
+    function claimPath(id) { return /databases/$(database)/documents/dividendClaims/$(id); }
+
+    match /dividendClaims/{id} {
+      allow get, list: if isAdmin() || isOracle() || (signedIn() && exists(bindingPath()) && resource.data.playerId == myPid() && isPlayer(myPid()));
+      allow create: if isOracle() && id == string(request.resource.data.week) + '_' + request.resource.data.playerId
+        && request.resource.data.keys().hasOnly(['playerId', 'week', 'items', 'total', 'claimed', 'at', 'lastLedger'])
+        && request.resource.data.claimed == 0 && request.resource.data.lastLedger == null
+        && request.resource.data.total is int && request.resource.data.total > 0 && request.resource.data.total <= 200;
+      allow update: if (isOracle() && onlyChanged(resource.data, request.resource.data, ['items', 'total', 'at'])
+            && request.resource.data.total is int && request.resource.data.total >= resource.data.total && request.resource.data.total <= 200)
+        || (signedIn() && onlyChanged(resource.data, request.resource.data, ['claimed', 'lastLedger'])
+            && request.resource.data.claimed == resource.data.total
+            && ledgerCreatedNow(request.resource.data.lastLedger)
+            && getAfter(ledgerPath(request.resource.data.lastLedger)).data.type == 'dividend'
+            && getAfter(ledgerPath(request.resource.data.lastLedger)).data.detail.claimId == id);
+      allow delete: if isAdmin();
+    }
+
+    function dividendOk(entryId, e, before, after) {
+      let d = e.detail;
+      let c0 = get(claimPath(d.claimId)).data;
+      let c1 = getAfter(claimPath(d.claimId)).data;
+      return d.keys().hasOnly(['claimId', 'amount'])
+        && c0.playerId == e.playerId && d.amount == c0.total - c0.claimed && d.amount > 0
+        && c1.claimed == c0.total && c1.lastLedger == entryId
+        && e.delta == d.amount && e.debtDelta == 0 && e.vaultDelta == -d.amount
+        && onlyChanged(before, after, ['balance', 'seq']);
     }
 
     // ── 현물 ── 보유량은 1/10000개 단위(units), 가격은 1/100 단위. 금액 = units × 가격 / 1,000,000.

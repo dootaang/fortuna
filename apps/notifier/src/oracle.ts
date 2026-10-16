@@ -1,5 +1,5 @@
 import {
-  REGIME_ORDER_TEXT, addFunding, fundingDue, isRegimeKind, type Regime,
+  REGIME_ORDER_TEXT, addFunding, creditClaim, dividendFor, holdingValue, coinDistrictLiberated, fundingDue, isRegimeKind, type Regime,
   ANALYSTS, COIN_IDS, activityRatio, analystBand, anchorOf, buildStructure, coinForDistrict, debtFactor, fundamentalsInput, playerShare, reportAt, reportSeedKey, weekIndexAt, weekStartMs, foldCandle, heatFactor, hourDocId, hourIndexAt, initialMarketState, isCoinId, marketSeed, minuteKey, normalizeMarket, normalizeNotify,
   seedKeys, stateFromTick, stepMarket, tickFromState, tickSeq, triggerAt,
   type Candle, type CoinId, type OpenLot, type FeedItem, type MarketConfig, type MarketState, type NewsShock, type NewsSize, type TickDoc, type WorldInput,
@@ -83,15 +83,16 @@ export async function observeWorld(fs: FirestoreRest, atMs: number): Promise<Wor
   // Resident activity is an extra; prices keep their world even if it fails.
   try {
     const players = await fs.list("players");
-    const since = weekStartMs(weekIndexAt(atMs)), ids = new Set(arrived.map((wallet) => wallet.id));
+    const week = weekIndexAt(atMs), ids = new Set(arrived.map((wallet) => wallet.id));
     const residents = players.filter((player) => ids.has(player.id));
     const counts = await Promise.all(residents.map(async (player) => {
+      // Every ledger entry carries the KST week it was written in, so equality filters are enough (no composite index).
+      const thisWeek = { playerId: player.id, weekIndex: week };
       const [work, repay, skill] = await Promise.all([
-        fs.aggregate("ledger", { playerId: player.id, type: "work" }, "at", since, { count: true }),
-        // Repayments are few; read them rather than sum (a sum aggregation needs its own index).
-        fs.query("ledger", { playerId: player.id, type: "repay" }, 300)
-          .then((rows) => rows.filter((row) => toMs(row.data.at) >= since).reduce((sum, row) => sum + Number((row.data.detail as { amount?: unknown } | undefined)?.amount ?? 0), 0)),
-        fs.aggregate("ledger", { playerId: player.id, type: "skill" }, "at", since, { count: true }),
+        fs.aggregate("ledger", { ...thisWeek, type: "work" }, { count: true }),
+        fs.query("ledger", { ...thisWeek, type: "repay" }, 300)
+          .then((rows) => rows.reduce((sum, row) => sum + Number((row.data.detail as { amount?: unknown } | undefined)?.amount ?? 0), 0)),
+        fs.aggregate("ledger", { ...thisWeek, type: "skill" }, { count: true }),
       ]);
       return { coin: coinForDistrict(String(player.data.districtId ?? "")), work, repay, skill };
     }));
@@ -106,7 +107,7 @@ export async function observeWorld(fs: FirestoreRest, atMs: number): Promise<Wor
     world.activity = activity; world.spc = spc;
   } catch (error) {
     console.error("activity", error);
-    world.activityError = String(error instanceof Error ? error.message : error).slice(0, 300);
+    world.activityError = String(error instanceof Error ? error.message : error).slice(0, 1_500);
   }
   return world;
 }
@@ -189,6 +190,27 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     lots.push({ coin, side, notional, liq: Number(doc.data.liq) });
   }
 
+  // 6단계 배당: at each announcement, credit spot holders of that coin (capped weekly per player).
+  const dividends: Write[] = [];
+  if (config.dividends) {
+    for (const item of feed.filter((entry) => entry.kind === "earnings" && entry.coin)) {
+      const coin = item.coin as CoinId, surprise = state.coins[coin].eh?.at(-1) ?? 0, week = weekIndexAt(atMs);
+      const liberated = coinDistrictLiberated(coin, state.liberated);
+      const holders = (await fs.query("holdings", { coin }, 300)).filter((row) => Number(row.data.units) > 0);
+      for (const holder of holders) {
+        const pid = String(holder.data.playerId);
+        const amount = dividendFor(holdingValue(Number(holder.data.units), state.coins[coin].p), surprise, liberated);
+        if (amount <= 0) continue;
+        const existing = await fs.get(`dividendClaims/${week}_${pid}`);
+        const credit = creditClaim(existing ? { items: (existing.data.items as Record<string, number>) ?? {}, total: Number(existing.data.total ?? 0) } : null, coin, amount);
+        if (credit.added <= 0) continue;
+        dividends.push(existing
+          ? { update: { name: existing.name, fields: encodeFields({ items: credit.items, total: credit.total, at: new Stamp(atMs) }) }, updateMask: { fieldPaths: ["items", "total", "at"] }, currentDocument: { updateTime: existing.updateTime } }
+          : { update: { name: fs.name(`dividendClaims/${week}_${pid}`), fields: encodeFields({ playerId: pid, week, items: credit.items, total: credit.total, claimed: 0, at: new Stamp(atMs), lastLedger: null }) }, currentDocument: { exists: false } });
+      }
+    }
+  }
+
   // 애널리스트 리포트: the day after each announcement, scoring the previous band against today's price.
   const reports: Write[] = [];
   const week = weekIndexAt(atMs);
@@ -229,6 +251,7 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     ...due.map((doc) => ({ update: { name: doc.name, fields: encodeFields({ status: "published", publishedSeq: seq }) }, updateMask: { fieldPaths: ["status", "publishedSeq"] }, currentDocument: { updateTime: doc.updateTime } })),
     ...whispers.map((doc) => ({ update: { name: doc.name, fields: encodeFields({ whispered: true }) }, updateMask: { fieldPaths: ["whispered"] }, currentDocument: { updateTime: doc.updateTime } })),
     ...reports,
+    ...dividends,
     ...(orderDoc ? [{ update: { name: orderDoc.name, fields: encodeFields({ status: "done", appliedSeq: seq }) }, updateMask: { fieldPaths: ["status", "appliedSeq"] }, currentDocument: { updateTime: orderDoc.updateTime } }] : []),
     ...(state.regime && (state.regime.since !== base.regime?.since || state.regime.kind !== base.regime?.kind || !base.regime) ? [{
       update: {

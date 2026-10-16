@@ -1,7 +1,7 @@
-import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Firestore, type Transaction } from "firebase/firestore";
+import { Timestamp, addDoc, collection, doc, getDoc, type DocumentReference, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Firestore, type Transaction } from "firebase/firestore";
 import {
   COINS, DEFAULT_MARKET, HOUR_MS, KST_OFFSET_MS, entryPaused, weekIndexAt, weeklyLevy, hourIndexAt, leverageChoices, normalizeMarket, periodWords, quoteBuy, quoteClose, quoteOpen, quoteSell,
-  type RegimeKind, type BuyQuote, type CloseKind, type SellQuote, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
+  type DividendClaim, type RegimeKind, type BuyQuote, type CloseKind, type SellQuote, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
 } from "@fortuna/core";
 import { FortunaError, writeEntry, type PlayerSession, type Session } from "./ledger-write.ts";
 import { readEconomy, readWallet } from "./player-ops.ts";
@@ -308,4 +308,22 @@ export async function scheduleRegime(session: Session, kind: RegimeKind, minutes
 
 export async function cancelRegime(session: Session, id: string): Promise<void> {
   await updateDoc(doc(session.db, "marketRegimes", id), { status: "cancelled" });
+}
+
+// ── 거래소 2부 6단계: 배당 수령 ──
+
+/** Collect what the recorder credited in a week's dividend claim (the vault pays it). */
+export async function claimDividend(session: PlayerSession, claimId: string): Promise<{ ledgerId: string; amount: number }> {
+  const { db } = session;
+  return runTransaction(db, async (tx) => {
+    const wallet = await readWallet(tx, session);
+    const ref = doc(db, "dividendClaims", claimId) as DocumentReference<DividendClaim<Timestamp>>;
+    const claim = (await tx.get(ref)).data();
+    if (!claim || claim.playerId !== session.pid) throw new FortunaError("no-claim", "배당 명세를 찾을 수 없습니다.");
+    const amount = claim.total - claim.claimed;
+    if (amount <= 0) throw new FortunaError("claimed", "이미 받은 배당입니다.");
+    const ledgerId = writeEntry(tx, session, session.pid, wallet, { type: "dividend", actor: "player", delta: amount, vaultDelta: -amount, detail: { claimId, amount } });
+    tx.update(ref, { claimed: claim.total, lastLedger: ledgerId });
+    return { ledgerId, amount };
+  });
 }

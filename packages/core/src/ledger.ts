@@ -3,7 +3,7 @@ import type { GameId, Venue, WagerTrace } from "./games/types.ts";
 /** Firestore Timestamp without importing the SDK into the pure core. */
 export interface TimestampLike { toMillis(): number; }
 
-export const LEDGER_TYPES = ["arrival", "work", "betOpen", "betSettle", "skill", "repay", "jointDeposit", "fundContribution", "shop", "itemUse", "adminAdjust", "pvpStake", "pvpPayout", "marketOpen", "marketClose", "spotBuy", "spotSell"] as const;
+export const LEDGER_TYPES = ["arrival", "work", "betOpen", "betSettle", "skill", "repay", "jointDeposit", "fundContribution", "shop", "itemUse", "adminAdjust", "pvpStake", "pvpPayout", "marketOpen", "marketClose", "spotBuy", "spotSell", "dividend"] as const;
 export type LedgerType = (typeof LEDGER_TYPES)[number];
 
 export interface WagerStep<T = TimestampLike> { a: string; t: T; }
@@ -93,6 +93,7 @@ export const LEDGER_LABELS: Readonly<Record<LedgerType, string>> = {
   pvpStake: "대결 판돈",
   pvpPayout: "대결 정산",
   marketOpen: "거래소 진입",
+  dividend: "배당",
   marketClose: "거래소 정산",
   spotBuy: "현물 매수",
   spotSell: "현물 매도",
@@ -110,7 +111,7 @@ export const LEDGER_GROUPS: Readonly<Record<string, readonly LedgerType[]>> = {
   "관리자 조정": ["adminAdjust"],
   도착: ["arrival"],
   대결: ["pvpStake", "pvpPayout"],
-  거래소: ["marketOpen", "marketClose", "spotBuy", "spotSell"],
+  거래소: ["marketOpen", "marketClose", "spotBuy", "spotSell", "dividend"],
 };
 
 export function emptyWallet(playerId: string): Wallet<never> {

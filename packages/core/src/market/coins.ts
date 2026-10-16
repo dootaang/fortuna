@@ -84,6 +84,12 @@ export const COINS: Readonly<Record<CoinId, CoinDef>> = {
 
 export function isCoinId(value: unknown): value is CoinId { return typeof value === "string" && (COIN_IDS as readonly string[]).includes(value); }
 
+/** Whether the coin's district is in a tick's liberated list (FTN has none). */
+export function coinDistrictLiberated(coin: CoinId, liberated: readonly string[]): boolean {
+  const district = COINS[coin].districtId;
+  return district !== null && liberated.includes(district);
+}
+
 export function coinForDistrict(districtId: string): CoinId | null {
   return COIN_IDS.find((id) => COINS[id].districtId === districtId) ?? null;
 }

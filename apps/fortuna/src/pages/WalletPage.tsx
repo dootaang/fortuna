@@ -145,6 +145,7 @@ export function describeEntry(entry: LedgerEntry<Timestamp>): string {
     }
     case "spotBuy": return `${detail.coin} ${(detail.units / 10_000).toFixed(4)}개 매수 · 가격 ${(detail.price / 100).toFixed(2)} · 수수료 ${detail.fee}`;
     case "spotSell": return `${detail.coin} ${(detail.units / 10_000).toFixed(4)}개 매도 · 가격 ${(detail.price / 100).toFixed(2)} · 손익 ${detail.payout - detail.costOut}${detail.levy ? ` · 환전가 특별 징수 ${detail.levy}` : ""}`;
+    case "dividend": return `현물 배당 ${detail.amount}`;
     default: return "";
   }
 }

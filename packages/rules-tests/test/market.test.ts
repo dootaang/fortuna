@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getAuth } from "firebase/auth";
 import { deleteField, doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
-import { DEFAULT_MARKET, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, reportAt, weekIndexAt, type CoinId } from "@fortuna/core";
+import { DEFAULT_MARKET, earningsAt, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, reportAt, weekIndexAt, type CoinId } from "@fortuna/core";
 import {
-  announceBossFight, arrive, buySpot, scheduleRate, cancelRate, scheduleRegime, cancelRegime, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
+  announceBossFight, arrive, buySpot, scheduleRate, cancelRate, scheduleRegime, cancelRegime, claimDividend, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
   type PlayerSession, type Session,
 } from "@fortuna/data";
 import { FirestoreRest } from "../../../apps/notifier/src/firestore-rest.ts";
@@ -443,6 +443,30 @@ describe("funding (거래소 2부 5단계)", () => {
     await asRoot((root) => root.doc(`positions/${positionId}`).update({ status: "capped", exit: quote.cap, exitSeq: 1, exitAt: new Date(), exitF: 2_000 }));
     const result = await closePosition(player, positionId);
     expect(result.quote.funding).toBe(Math.floor((300 * 2_000) / 1_000_000));
+  });
+});
+
+describe("dividends (거래소 2부 6단계)", () => {
+  it("credits spot holders at the announcement; the holder collects it once", async () => {
+    await buySpot(player, "LNH", 500);
+    const week = weekIndexAt(Date.now()) + 1, due = earningsAt("LNH", week);
+    clockMs = Math.max(clockMs, due - 5_000);
+    const result = await tick();
+    expect(result.feed.some((item) => item.kind === "earnings" && item.coin === "LNH")).toBe(true);
+    const claimId = `${week}_${player.pid}`;
+    const claim = (await rootData(`dividendClaims/${claimId}`))!;
+    expect(claim).toMatchObject({ playerId: player.pid, claimed: 0 });
+    expect(claim.total).toBeGreaterThan(0);
+    expect(claim.total).toBeLessThanOrEqual(200);
+    const vault0 = (await rootData("vault/main"))!.amount, balance0 = (await rootData(`wallets/${player.pid}`))!.balance;
+    const paid = await claimDividend(player, claimId);
+    expect(paid.amount).toBe(claim.total);
+    expect((await rootData(`wallets/${player.pid}`))!.balance).toBe(balance0 + claim.total);
+    expect((await rootData("vault/main"))!.amount).toBe(vault0 - claim.total);
+    await expect(claimDividend(player, claimId)).rejects.toMatchObject({ code: "claimed" });
+    // Players cannot write claims for themselves.
+    await denied(setDoc(doc(player.db, "dividendClaims", `${week + 1}_${player.pid}`), { playerId: player.pid, week: week + 1, items: { LNH: 200 }, total: 200, claimed: 0, at: serverTimestamp(), lastLedger: null }));
+    await denied(updateDoc(doc(player.db, "dividendClaims", claimId), { total: 200 }));
   });
 });
 

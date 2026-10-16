@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, limit, orderBy, query, where, type CollectionReference, type DocumentReference, type Timestamp } from "firebase/firestore";
-import { COIN_IDS, DEFAULT_MARKET, hourIndexAt, normalizeMarket, type CoinId, type FundamentalsDoc, type HourDoc, type MarketConfig, type RateEventDoc, type ReportDoc, type TickDoc } from "@fortuna/core";
+import { COIN_IDS, DEFAULT_MARKET, hourIndexAt, normalizeMarket, type CoinId, type DividendClaim, type FundamentalsDoc, type HourDoc, type MarketConfig, type RateEventDoc, type ReportDoc, type TickDoc } from "@fortuna/core";
 import { refs, settleEndedPositions, type FeedDoc, type HoldingDoc, type PositionDoc } from "@fortuna/data";
 import { db } from "../firebase.ts";
 import { usePlayer } from "../session/player.tsx";
@@ -166,3 +166,11 @@ export function latestReports(reports: readonly ReportDoc<Timestamp>[]): Map<Coi
   }
   return out;
 }
+
+/** Dividend claims with something left to collect (거래소 2부 6단계). */
+export function useDividendClaims(): Row<DividendClaim<Timestamp>>[] {
+  const { session } = usePlayer();
+  const live = useLiveQuery(query(collection(db, "dividendClaims") as CollectionReference<DividendClaim<Timestamp>>, where("playerId", "==", session.pid)), `dividends:${session.pid}`);
+  return useMemo(() => (live.status === "ready" ? live.data.filter((row) => row.data.total > row.data.claimed) : []), [live]);
+}
+
