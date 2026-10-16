@@ -3,7 +3,7 @@ import { getAuth } from "firebase/auth";
 import { deleteField, doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
 import { DEFAULT_MARKET, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, reportAt, weekIndexAt, type CoinId } from "@fortuna/core";
 import {
-  announceBossFight, arrive, buySpot, scheduleRate, cancelRate, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
+  announceBossFight, arrive, buySpot, scheduleRate, cancelRate, scheduleRegime, cancelRegime, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
   type PlayerSession, type Session,
 } from "@fortuna/data";
 import { FirestoreRest } from "../../../apps/notifier/src/firestore-rest.ts";
@@ -372,6 +372,30 @@ describe("earnings, reports and rate decisions (거래소 2부 2단계)", () => 
     expect(report.low).toBeLessThan(report.mid);
     await tick();
     await denied(setDoc(doc(player.db, "marketReports", `${week}_S9`), { coin: "S9" }));
+  });
+});
+
+describe("hidden regime (거래소 2부 4단계)", () => {
+  it("keeps the regime private, survives a reload, and applies a dealer's 국면 발동", async () => {
+    const rest = await oracleRest(oracle);
+    const orderId = await scheduleRegime(admin, "fear", 30, 0);
+    const skipped = await scheduleRegime(admin, "bull", 60, 600);
+    await cancelRegime(admin, skipped);
+    const regimes = await rest.query("marketRegimes", { status: "pending" });
+    expect(regimes.map((row) => row.id)).toEqual([orderId]);
+    const result = await tick({ regimes });
+    expect(result.feed.some((item) => item.kind === "regime")).toBe(true);
+    expect(await rootData(`marketRegimes/${orderId}`)).toMatchObject({ status: "done" });
+    expect(await rootData("oracleState/regime")).toMatchObject({ kind: "fear" });
+    // Not in the public tick, and not readable by players.
+    const hour = (await rootData(`market/h${Math.floor(clockMs / 3_600_000)}`))!;
+    expect(JSON.stringify(hour.last)).not.toContain("fear");
+    await denied(getDoc(doc(player.db, "oracleState", "regime")));
+    await denied(getDoc(doc(player.db, "marketRegimes", orderId)));
+    await denied(setDoc(doc(player.db, "marketRegimes", "x"), { kind: "bull", minutes: 30, at: serverTimestamp(), status: "pending" }));
+    // A reload restores it from the private document.
+    const again = await loadRecorder(rest, "secret", clockMs + 15_000);
+    expect(again.state?.regime).toMatchObject({ kind: "fear" });
   });
 });
 

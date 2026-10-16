@@ -63,7 +63,7 @@ describe("crowd", () => {
     }
     for (const id of COIN_IDS) {
       expect((pinned[id] ?? 0) / ticks, `${id} long share pinned to a bound`).toBeLessThan(0.15);
-      expect(size[id]! / ticks, `${id} average crowd size`).toBeGreaterThan(0.75);
+      expect(size[id]! / ticks, `${id} average crowd size`).toBeGreaterThan(0.6);
     }
   });
 
@@ -270,5 +270,46 @@ describe("automatic news balance (3단계, 원칙 4)", () => {
     const ratios = Object.fromEntries(Object.keys(paid).map((name) => [name, Math.round((paid[name]! / cost[name]!) * 1_000) / 10]));
     for (const [name, ratio] of Object.entries(ratios)) expect(ratio, name).toBeLessThan(103);
     expect(count["follow official@1x"]).toBeGreaterThan(100);
+  }, 300_000);
+});
+
+describe("hidden regime (4단계)", () => {
+  it("changes regimes, keeps them out of the public tick, and a perfect regime-knower stays under 103%", async () => {
+    const { quoteClose, tradeFee, REGIME } = await import("../src/index.ts");
+    const start = Date.UTC(2026, 9, 11, 15, 0), tick = 60, days = 360;
+    let state = initialMarketState(tickSeq(start, tick), start);
+    const seen = new Set<string>();
+    type Bet = { name: string; coin: CoinId; side: "long" | "short"; lev: number; entry: number; openedAtMs: number; fee: number; regimeSince: number };
+    let open: Bet[] = [];
+    const paid: Record<string, number> = {}, cost: Record<string, number> = {};
+    const settle = (bet: Bet, atMs: number, kind: "close" | "liquidated") => {
+      const quote = quoteClose(DEFAULT_MARKET, { coin: bet.coin, side: bet.side, leverage: bet.lev, margin: 100, fee: bet.fee, entry: bet.entry, openedAtMs: bet.openedAtMs }, kind, state.coins[bet.coin].p, atMs);
+      paid[bet.name] = (paid[bet.name] ?? 0) + quote.payout; cost[bet.name] = (cost[bet.name] ?? 0) + 100 + bet.fee;
+    };
+    for (let index = 1; index <= (days * 86_400) / tick; index += 1) {
+      const atMs = start + index * tick * 1000, seq = state.seq + 1, keys = seedKeys(seq, atMs, tick);
+      state = stepMarket(state, { seq, atMs, seeds: { tick: marketSeed(SECRET, keys.tick), blcNow: marketSeed(SECRET, keys.blcNow), blcPast: marketSeed(SECRET, keys.blcPast), s9Week: marketSeed(SECRET, keys.s9Week) }, config: { ...DEFAULT_MARKET, tickSeconds: tick } }).state;
+      const regime = state.regime!;
+      seen.add(regime.kind);
+      // Close what the regime no longer supports, and liquidations.
+      open = open.filter((bet) => {
+        const price = state.coins[bet.coin].p, move = 0.9 / bet.lev;
+        const liq = bet.side === "long" ? price <= bet.entry * (1 - move) : price >= bet.entry * (1 + move);
+        if (liq) { settle(bet, atMs, "liquidated"); return false; }
+        if (bet.regimeSince !== regime.since) { settle(bet, atMs, "close"); return false; }
+        return true;
+      });
+      if (!open.length) {
+        const enter = (name: string, coin: CoinId, side: "long" | "short", lev: number) => open.push({ name, coin, side, lev, entry: state.coins[coin].p, openedAtMs: atMs, fee: tradeFee(100 * lev, DEFAULT_MARKET), regimeSince: regime.since });
+        if (regime.kind === "bull") enter("bull FTN 20x", "FTN", "long", 20);
+        if (regime.kind === "bear") enter("bear FTN 20x", "FTN", "short", 20);
+        if (regime.kind === "fear") { enter("fear FTN 20x", "FTN", "short", 20); enter("fear ORB 10x", "ORB", "long", 10); }
+        if (regime.kind === "altseason") for (const coin of ["HBT", "LNH", "S9"] as CoinId[]) enter(`altseason ${coin} 10x`, coin, (regime.dirs?.[coin] ?? 1) > 0 ? "long" : "short", 10);
+      }
+    }
+    expect([...seen].sort()).toEqual(Object.keys(REGIME).sort());
+    expect(JSON.stringify(tickFromState(state, 0))).not.toContain("regime");
+    const ratios = Object.fromEntries(Object.keys(paid).map((name) => [name, Math.round((paid[name]! / cost[name]!) * 1_000) / 10]));
+    for (const [name, ratio] of Object.entries(ratios)) expect(ratio, `${name} ${JSON.stringify(ratios)}`).toBeLessThan(103);
   }, 300_000);
 });

@@ -6,6 +6,7 @@ import { COIN_IDS, COINS, coinForDistrict, isMoonlessNight, type CoinId } from "
 import type { MarketConfig } from "./config.ts";
 import { FEED_TEXT, NEWS_SIZES, liberationFeed, type FeedItem, type NewsSize } from "./feed.ts";
 import { crowdSeed, initialCrowd, stepCrowd, usualSigma, type Crowd } from "./crowd.ts";
+import { initialRegime, regimeEffect, regimeSeed, stepRegime, type Regime, type RegimeKind } from "./regime.ts";
 import { NEWS_FACTOR_HOURS, newsSeed, stepAutoNews, type PendingNews } from "./autonews.ts";
 import { PEAD, PEAD_HOURS, PRE_BAKE, earningsAt, earningsFeed, earningsJump, heatShare, nextFf, rateFeed, rateShock } from "./fundamentals.ts";
 
@@ -67,6 +68,8 @@ export interface MarketState {
   debtF: number;
   /** WHL anchor factor from recent table activity. */
   heatF: number;
+  /** 4단계: the hidden market regime. Never written to the public tick (the recorder keeps it privately). */
+  regime?: Regime | undefined;
 }
 
 export interface WorldInput {
@@ -89,12 +92,14 @@ export interface StepInput {
   seq: number;
   atMs: number;
   seeds: StepSeeds;
-  config: Pick<MarketConfig, "tickSeconds" | "debtLink" | "coins"> & { npc?: MarketConfig["npc"] | undefined; earnings?: boolean | undefined; autoNews?: boolean | undefined };
+  config: Pick<MarketConfig, "tickSeconds" | "debtLink" | "coins"> & { npc?: MarketConfig["npc"] | undefined; earnings?: boolean | undefined; autoNews?: boolean | undefined; regimes?: boolean | undefined };
   world?: WorldInput | undefined;
   news?: NewsShock[] | undefined;
   fundamentals?: FundamentalsInput | undefined;
   /** A rate decision landing this tick: change of the hourly interest in basis points. */
   rate?: { fromBps: number; toBps: number } | undefined;
+  /** A dealer-ordered regime starting this tick (국면 발동). */
+  regimeOrder?: { kind: RegimeKind; minutes: number } | undefined;
 }
 
 /** The 32-bit seed behind one random decision; only the recorder knows `secret`. */
@@ -243,9 +248,14 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
     feed.push(rateFeed(input.rate.fromBps, input.rate.toBps));
   }
 
+  // 4단계: the hidden regime (its own random stream).
+  const regime = config.regimes === false ? undefined
+    : stepRegime(state.regime ?? initialRegime(prevMs), atMs, hours, new XorShift32(regimeSeed(input.seeds.tick)), input.regimeOrder);
+
   const next: MarketState = {
     seq, atMs, prevSeq: state.seq, prev: { ...state.prev }, coins: { ...state.coins },
     liberated: [...world.liberated], houseOpen: world.houseOpen, debtF: world.debtF, heatF: world.heatF,
+    ...(regime ? { regime } : {}),
   };
   const common = normal(rng);
   // The crowd draws from its own stream so the price path stays exactly as before.
@@ -291,7 +301,8 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
       if (story.drift) { nd = story.drift.perHour; ndu = story.drift.until; }
     }
     const vol = def.volH * (config.coins[id]?.volMult ?? 1) * (storm ? 2.5 : 1) * boost.boost * night * tense * Math.sqrt(hours);
-    const e = id === "FTN" ? common : def.beta * common + Math.sqrt(1 - def.beta * def.beta) * normal(rng);
+    const mood = regimeEffect(regime, id, def.beta);
+    const e = id === "FTN" ? common : mood.beta * common + Math.sqrt(1 - mood.beta * mood.beta) * mood.ownVol * normal(rng);
     const noise = vol * e;
     let r = noise - (vol * vol) / 2 + def.revertH * hours * Math.log(anchor / cs.p) + def.momentum * cs.mom;
     if (rng.next() < (def.jumpsPerDay * hours) / 24) {
@@ -300,7 +311,9 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
       r += Math.log(down ? 1 - size : 1 + size);
       if (id === "ORB") feed.push({ kind: "orbSaving", coin: "ORB", tone: "down", text: FEED_TEXT.orbSaving });
     }
-    r += (jump[id] ?? 0) + earningsMove;
+    r += (jump[id] ?? 0) + earningsMove + mood.drift * hours;
+    // 선행·후행: S9 follows HBT a few minutes late (섹터9 buys the tower's data).
+    if (id === "S9") r += 0.25 * state.coins.HBT.mom;
     const base = def.anchor;
     // A halted coin (dealer circuit breaker) keeps its price, so nothing liquidates while nobody can trade it.
     const halted = config.coins[id]?.enabled === false;

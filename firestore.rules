@@ -755,6 +755,24 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // 4단계 숨은 국면: 지금 국면은 기록원과 딜러만 본다. 딜러는 국면 발동을 예약한다.
+    match /oracleState/{id} {
+      allow read: if isAdmin() || isOracle();
+      allow write: if isOracle();
+    }
+
+    match /marketRegimes/{id} {
+      allow read: if isAdmin() || isOracle();
+      allow create: if isAdmin() && request.resource.data.status == 'pending'
+        && request.resource.data.kind in ['sideways', 'bull', 'bear', 'fear', 'altseason']
+        && request.resource.data.minutes is int && request.resource.data.minutes >= 5 && request.resource.data.minutes <= 1440
+        && request.resource.data.at is timestamp;
+      allow update: if (isAdmin() && onlyChanged(resource.data, request.resource.data, ['status']) && request.resource.data.status == 'cancelled')
+        || (isOracle() && resource.data.status == 'pending' && onlyChanged(resource.data, request.resource.data, ['status', 'appliedSeq'])
+            && request.resource.data.status == 'done' && request.resource.data.appliedSeq is int);
+      allow delete: if isAdmin();
+    }
+
     match /marketEvents/{id} {
       allow read: if signedIn();
       allow create: if isAdmin() && request.resource.data.kind == 'rate' && request.resource.data.status == 'pending'

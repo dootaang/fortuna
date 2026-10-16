@@ -118,6 +118,13 @@ test("dealer: exchange tab shows the recorder, positions and news desk", async (
   await expect(page.getByText("중원 간부전을 예고했습니다.")).toBeVisible();
   await expect(page.getByText(/간부전 대기 \(새 진입·매수 정지\)/)).toBeVisible();
   await expect(page.getByText("중원 간부전이 예고되었다. 거리의 말소리가 낮아진다.")).toBeVisible();
+  // 숨은 국면: the dealer sees a panel and can schedule a 국면 발동.
+  const regimeDesk = page.locator("section", { hasText: "숨은 국면" });
+  await regimeDesk.getByRole("button", { name: "국면 발동" }).click();
+  await expect(regimeDesk.getByText(/공포 30분/)).toBeVisible();
+  await regimeDesk.getByRole("button", { name: "취소" }).click();
+  await expect(regimeDesk.getByText(/공포 30분/)).toHaveCount(0);
+
   // 지배인 금리 결정: announce one, see it pending, cancel it.
   const desk = page.locator("section", { hasText: "지배인 금리 결정" });
   await desk.getByLabel("새 이자 (bp/시간)").fill("25");

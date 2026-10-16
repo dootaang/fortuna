@@ -227,6 +227,8 @@ export interface FundamentalsDoc<T = unknown> {
   at: T;
   week: number;
   coins: Record<CoinId, { mood: number; ratio: number | null; residents: number; spc: number }>;
+  /** Why resident activity could not be counted (the dealer sees it). */
+  error?: string | null;
 }
 
 /** marketReports/{week}_{coin} */

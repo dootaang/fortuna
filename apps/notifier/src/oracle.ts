@@ -1,4 +1,5 @@
 import {
+  REGIME_ORDER_TEXT, isRegimeKind, type Regime,
   ANALYSTS, COIN_IDS, activityRatio, analystBand, anchorOf, buildStructure, coinForDistrict, debtFactor, fundamentalsInput, playerShare, reportAt, reportSeedKey, weekIndexAt, weekStartMs, foldCandle, heatFactor, hourDocId, hourIndexAt, initialMarketState, isCoinId, marketSeed, minuteKey, normalizeMarket, normalizeNotify,
   seedKeys, stateFromTick, stepMarket, tickFromState, tickSeq, triggerAt,
   type Candle, type CoinId, type OpenLot, type FeedItem, type MarketConfig, type MarketState, type NewsShock, type NewsSize, type TickDoc, type WorldInput,
@@ -48,9 +49,15 @@ export async function loadRecorder(fs: FirestoreRest, secret: string, atMs: numb
   const current = await fs.get(`market/${hourDocId(hour)}`, ["last", `c.${minute}`]);
   const found = tickOf(current?.data) ?? tickOf((await fs.get(`market/${hourDocId(hour - 1)}`, ["last"]))?.data);
   const candle = ((current?.data.c as Record<string, unknown> | undefined)?.[minute] as Record<CoinId, Candle> | undefined) ?? null;
+  const state = found ? stateFromTick(found.tick, found.atMs) : null;
+  // The regime is not in the public tick; it lives in a document only the recorder and the dealer read.
+  const kept = state ? (await fs.get("oracleState/regime").catch(() => null))?.data : null;
+  if (state && kept && isRegimeKind(kept.kind)) {
+    state.regime = { kind: kept.kind, since: toMs(kept.since), forcedUntil: toMs(kept.forcedUntil), dirs: (kept.dirs as Regime["dirs"]) ?? undefined };
+  }
   return {
     fs, secret, config, hour, minute, candle,
-    state: found ? stateFromTick(found.tick, found.atMs) : null,
+    state,
     hourUpdateTime: current ? current.updateTime : null,
   };
 }
@@ -58,7 +65,7 @@ export async function loadRecorder(fs: FirestoreRest, secret: string, atMs: numb
 /** Residents' activity this week (거래소 2부 4-1): ratio against an ordinary week, per coin. */
 export interface Activity { ratio: number | null; residents: number; }
 
-export interface World extends WorldInput { activity?: Record<CoinId, Activity> | undefined; }
+export interface World extends WorldInput { activity?: Record<CoinId, Activity> | undefined; activityError?: string | undefined; }
 
 /** Liberations, house, total debt, table heat and resident activity — read every ten minutes. */
 export async function observeWorld(fs: FirestoreRest, atMs: number): Promise<World> {
@@ -95,7 +102,10 @@ export async function observeWorld(fs: FirestoreRest, atMs: number): Promise<Wor
       if (coin !== "WHL") spc[coin] = playerShare(ratio);
     }
     world.activity = activity; world.spc = spc;
-  } catch (error) { console.error("activity", error); }
+  } catch (error) {
+    console.error("activity", error);
+    world.activityError = String(error instanceof Error ? error.message : error).slice(0, 300);
+  }
   return world;
 }
 
@@ -117,7 +127,7 @@ function shockOf(doc: Doc): NewsShock | null {
   return { id: doc.id, coin, dir, size: size as NewsSize, minutes: Math.max(1, Math.min(1_440, Number(minutes) || 30)), headline: String(headline ?? "").slice(0, 200) };
 }
 
-export interface TickOptions { world?: World | undefined; news?: Doc[] | undefined; events?: Doc[] | undefined; }
+export interface TickOptions { world?: World | undefined; news?: Doc[] | undefined; events?: Doc[] | undefined; regimes?: Doc[] | undefined; }
 
 export async function recordTick(recorder: Recorder, atMs: number, options: TickOptions = {}, retry = true): Promise<TickResult> {
   const { fs, config } = recorder, tickMs = config.tickSeconds * 1000;
@@ -138,7 +148,11 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
   // 지배인 금리 결정: the first announced decision whose time has come.
   const rateDoc = (options.events ?? []).find((doc) => doc.data.kind === "rate" && toMs(doc.data.at) <= atMs && Number.isInteger(doc.data.bps));
   const rate = rateDoc ? { fromBps: config.interestBps, toBps: Number(rateDoc.data.bps) } : undefined;
-  const stepped = stepMarket(base, { seq, atMs, seeds, config, world: options.world, news: shocks, fundamentals, rate });
+  // 국면 발동: the first dealer order whose time has come.
+  const orderDoc = (options.regimes ?? []).find((doc) => isRegimeKind(doc.data.kind) && toMs(doc.data.at) <= atMs);
+  const regimeOrder = orderDoc && isRegimeKind(orderDoc.data.kind) ? { kind: orderDoc.data.kind, minutes: Math.max(5, Math.min(1_440, Number(orderDoc.data.minutes) || 30)) } : undefined;
+  const stepped = stepMarket(base, { seq, atMs, seeds, config, world: options.world, news: shocks, fundamentals, rate, regimeOrder });
+  if (regimeOrder && REGIME_ORDER_TEXT[regimeOrder.kind]) stepped.feed.push({ kind: "regime", coin: null, tone: "warn", text: REGIME_ORDER_TEXT[regimeOrder.kind]! });
   const feed: FeedItem[] = [
     ...whispers.map((doc) => ({ kind: "whisper", coin: isCoinId(doc.data.coin) ? doc.data.coin : null, tone: "info" as const, text: String(doc.data.whisper).slice(0, 200) })),
     ...stepped.feed,
@@ -207,18 +221,27 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     ...due.map((doc) => ({ update: { name: doc.name, fields: encodeFields({ status: "published", publishedSeq: seq }) }, updateMask: { fieldPaths: ["status", "publishedSeq"] }, currentDocument: { updateTime: doc.updateTime } })),
     ...whispers.map((doc) => ({ update: { name: doc.name, fields: encodeFields({ whispered: true }) }, updateMask: { fieldPaths: ["whispered"] }, currentDocument: { updateTime: doc.updateTime } })),
     ...reports,
+    ...(orderDoc ? [{ update: { name: orderDoc.name, fields: encodeFields({ status: "done", appliedSeq: seq }) }, updateMask: { fieldPaths: ["status", "appliedSeq"] }, currentDocument: { updateTime: orderDoc.updateTime } }] : []),
+    ...(state.regime && (state.regime.since !== base.regime?.since || state.regime.kind !== base.regime?.kind || !base.regime) ? [{
+      update: {
+        name: fs.name("oracleState/regime"),
+        fields: encodeFields({ kind: state.regime.kind, since: new Stamp(state.regime.since), forcedUntil: new Stamp(state.regime.forcedUntil), dirs: state.regime.dirs ?? null, at: new Stamp(atMs) }),
+      },
+    }] : []),
     ...(rateDoc && rate ? [
       { update: { name: rateDoc.name, fields: encodeFields({ status: "done", appliedSeq: seq }) }, updateMask: { fieldPaths: ["status", "appliedSeq"] }, currentDocument: { updateTime: rateDoc.updateTime } },
       { update: { name: fs.name("config/market"), fields: encodeFields({ interestBps: rate.toBps, lastRate: rateDoc.id }) }, updateMask: { fieldPaths: ["interestBps", "lastRate"] } },
     ] : []),
-    ...(options.world?.activity && fundamentals ? [{
+    ...(options.world && fundamentals ? [{
       update: {
         name: fs.name("market/fundamentals"),
         fields: encodeFields({
           at: new Stamp(atMs), week,
           coins: Object.fromEntries(COIN_IDS.map((coin) => [coin, {
-            mood: fundamentals.mood[coin], ratio: options.world!.activity![coin].ratio, residents: options.world!.activity![coin].residents, spc: state.coins[coin].spc ?? 0,
+            mood: fundamentals.mood[coin], ratio: options.world!.activity?.[coin].ratio ?? null, residents: options.world!.activity?.[coin].residents ?? 0, spc: state.coins[coin].spc ?? 0,
           }])),
+          // Shown on the dealer's exchange tab: resident activity could not be counted.
+          error: options.world.activityError ?? null,
         }),
       },
     }] : []),
@@ -230,6 +253,7 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
   try {
     const times = await fs.commit(writes);
     recorder.state = state; recorder.hour = hour; recorder.minute = minute; recorder.candle = candle; recorder.hourUpdateTime = times[0] ?? null;
+    if (orderDoc) options.regimes?.splice(options.regimes.indexOf(orderDoc), 1);
     if (rateDoc && rate) {
       recorder.config = { ...recorder.config, interestBps: rate.toBps };
       options.events?.splice(options.events.indexOf(rateDoc), 1);
@@ -249,6 +273,7 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     Object.assign(recorder, fresh);
     const news = options.news ? await fs.query("marketNews", { status: "pending" }) : undefined;
     if (options.events) options.events.splice(0, options.events.length, ...(await fs.query("marketEvents", { status: "pending" }).catch(() => [])));
+    if (options.regimes) options.regimes.splice(0, options.regimes.length, ...(await fs.query("marketRegimes", { status: "pending" }).catch(() => [])));
     if (options.news && news) options.news.splice(0, options.news.length, ...news);
     return recordTick(recorder, atMs, { ...options, news: options.news }, false);
   }
@@ -265,7 +290,7 @@ export async function oracleToken(env: RecorderEnv): Promise<string> {
   return ((await response.json()) as { id_token: string }).id_token;
 }
 
-const FEED_TO_DISCORD = new Set(["news", "liberation", "houseOpen", "earnings", "report", "rate"]);
+const FEED_TO_DISCORD = new Set(["news", "liberation", "houseOpen", "earnings", "report", "rate", "regime"]);
 /** 거래소 2부: at most this many market posts a day (KST), so the channel does not drown. */
 const DISCORD_DAILY_MAX = 4;
 
@@ -282,6 +307,7 @@ export class TickRunner {
   private token: { value: string; until: number } | null = null;
   private news: Doc[] = [];
   private events: Doc[] = [];
+  private regimes: Doc[] = [];
   private posted = { day: -1, count: 0 };
   private notify = normalizeNotify(undefined);
   private minuteChecked = -1;
@@ -301,7 +327,7 @@ export class TickRunner {
   snapshot(): RunnerSnapshot {
     const { fs: _fs, secret: _secret, ...recorder } = this.recorder ?? ({} as Recorder);
     return {
-      token: this.token, recorder: this.recorder ? recorder : null, news: this.news, events: this.events, notify: this.notify,
+      token: this.token, recorder: this.recorder ? recorder : null, news: this.news, events: this.events, regimes: this.regimes, notify: this.notify,
       minuteChecked: this.minuteChecked, worldChecked: this.worldChecked, posted: this.posted,
     };
   }
@@ -310,6 +336,7 @@ export class TickRunner {
     this.token = snapshot.token;
     this.news = snapshot.news;
     this.events = snapshot.events ?? [];
+    this.regimes = snapshot.regimes ?? [];
     this.posted = snapshot.posted ?? { day: -1, count: 0 };
     this.notify = snapshot.notify;
     this.minuteChecked = snapshot.minuteChecked;
@@ -328,12 +355,14 @@ export class TickRunner {
     if (!this.recorder || minute !== this.minuteChecked) {
       if (!this.recorder) this.recorder = await loadRecorder(fs, this.env.MARKET_SECRET, nowMs);
       else this.recorder.config = normalizeMarket((await fs.get("config/market"))?.data);
-      const [news, notify, events] = await Promise.all([
+      const [news, notify, events, regimes] = await Promise.all([
         fs.query("marketNews", { status: "pending" }).catch(() => this.news), fs.get("config/notify").catch(() => null),
         fs.query("marketEvents", { status: "pending" }).catch(() => this.events),
+        fs.query("marketRegimes", { status: "pending" }).catch(() => this.regimes),
       ]);
       this.news = news;
       this.events = events;
+      this.regimes = regimes;
       this.notify = normalizeNotify(notify?.data);
       this.minuteChecked = minute;
     }
@@ -348,7 +377,7 @@ export class TickRunner {
       world = await observeWorld(fs, at).catch((error) => { console.error("observe", error); return undefined; });
       this.worldChecked = tenth;
     }
-    const result = await recordTick(recorder, at, { world, news: this.news, events: this.events });
+    const result = await recordTick(recorder, at, { world, news: this.news, events: this.events, regimes: this.regimes });
     if (result.status === "written") await this.announce(result.feed);
     return result;
   }
@@ -381,6 +410,7 @@ export interface RunnerSnapshot {
   news: Doc[];
   notify: ReturnType<typeof normalizeNotify>;
   events?: Doc[];
+  regimes?: Doc[];
   posted?: { day: number; count: number };
   minuteChecked: number;
   worldChecked: number;

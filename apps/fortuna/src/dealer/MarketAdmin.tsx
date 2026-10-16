@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { collection, orderBy, query, limit, where, type CollectionReference, type Timestamp } from "firebase/firestore";
+import { collection, doc, orderBy, query, limit, where, type CollectionReference, type DocumentReference, type Timestamp } from "firebase/firestore";
 import {
   COINS, COIN_IDS, NEWS_SIZE_LABELS, entryPaused, weekIndexAt, formatPrice, formatUnits, holdingValue, hourIndexAt, liveEquity, normalizeMarket,
-  type CoinId, type MarketConfig, type NewsSize, type RateEventDoc,
+  REGIME, REGIMES, type FundamentalsDoc, type CoinId, type MarketConfig, type NewsSize, type RateEventDoc, type RegimeKind,
 } from "@fortuna/core";
-import { announceBossFight, cancelNews, cancelRate, refs, scheduleRate, registerOracle, saveMarket, scheduleNews, setCoinPaused, voidPosition, type NewsInput } from "@fortuna/data";
+import { announceBossFight, cancelNews, cancelRate, cancelRegime, refs, scheduleRate, scheduleRegime, registerOracle, saveMarket, scheduleNews, setCoinPaused, voidPosition, type NewsInput } from "@fortuna/data";
 import { useLiveDoc, useLiveQuery } from "../session/live.ts";
 import { Coins, Empty, Frame, Notice, NumberField, Stat, TextField, Toggle, cx, formatDate, useAction, useToast } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
@@ -21,6 +21,7 @@ export function MarketAdmin() {
       <OpenPositions market={market} />
       <Holdings />
       <NewsDesk />
+      <RegimeDesk market={market} />
       <RateDesk market={market} />
       <WeekLevies market={market} />
       <MarketEditor key={JSON.stringify(market)} market={market} />
@@ -266,6 +267,7 @@ function MarketEditor({ market }: { market: MarketConfig }) {
           <Toggle label="NPC 거래자 (주민 군중)" checked={draft.npc.enabled} onChange={(enabled) => set({ npc: { ...draft.npc, enabled } })} hint="가상 포지션 묶음. 코인은 오가지 않고, 롱/숏·청산 지도·거래량에 섞여 보입니다." />
           <NumberField label="군중 규모 ×" value={draft.npc.scale} step={0.1} onChange={(scale) => set({ npc: { ...draft.npc, scale } })} min={0} max={5} />
           <Toggle label="구역 실적·리포트" checked={draft.earnings} onChange={(earnings) => set({ earnings })} hint="매일 21시 실적 발표, 다음 날 정오 리포트. 끄면 기준가 배율은 그대로 멈춥니다." />
+          <Toggle label="숨은 국면" checked={draft.regimes} onChange={(regimes) => set({ regimes })} hint="횡보·상승장·하락장·공포·알트 시즌. 끄면 늘 횡보입니다." />
           <Toggle label="자동 뉴스" checked={draft.autoNews} onChange={(autoNews) => set({ autoNews })} hint="종목마다 하루 3건쯤: 공식(늘 사실) · 신문(80%) · 골목 소문(60%). 종목별로도 끌 수 있습니다." />
         </div>
         <p className="field-label mt-4">종목별 거래 정지 · 변동성 배수</p>
@@ -286,6 +288,64 @@ function MarketEditor({ market }: { market: MarketConfig }) {
         })}>저장</button>
       </Frame>
     </section>
+  );
+}
+
+/** 숨은 국면 (4단계): what the market is doing now (dealer only), and 국면 발동 for story events. */
+function FundamentalsHealth() {
+  const { session } = useDealer();
+  const live = useLiveDoc(doc(session.db, "market", "fundamentals") as DocumentReference<FundamentalsDoc<Timestamp>>, "dealer:fundamentals");
+  const data = live.status === "ready" ? live.data : null;
+  if (!data) return <Notice>구역 실적 자료가 아직 없습니다. 기록원이 10분마다 씁니다.</Notice>;
+  return data.error
+    ? <Notice tone="error">주민 활동을 세지 못했습니다: {data.error}</Notice>
+    : <p className="text-xs text-mist">구역 실적 자료 {formatDate(data.at?.toMillis?.() ?? 0)} 갱신 · 주민 활동 정상</p>;
+}
+
+function RegimeDesk({ market }: { market: MarketConfig }) {
+  const { session } = useDealer();
+  const current = useLiveDoc(doc(session.db, "oracleState", "regime") as DocumentReference<{ kind: RegimeKind; since: Timestamp; forcedUntil: Timestamp }>, "dealer:regime");
+  const orders = useLiveQuery(query(collection(session.db, "marketRegimes") as CollectionReference<{ kind: RegimeKind; minutes: number; at: Timestamp; status: string }>, where("status", "==", "pending")), "dealer:regimes");
+  const [kind, setKind] = useState<RegimeKind>("fear");
+  const [minutes, setMinutes] = useState(30);
+  const [delay, setDelay] = useState(0);
+  const { busy, run } = useAction();
+  const now = current.status === "ready" ? current.data : null;
+  const forced = now?.forcedUntil?.toMillis?.() ?? 0;
+  return (
+    <Frame>
+      <SectionTitle title="숨은 국면" />
+      <div className="mb-2"><FundamentalsHealth /></div>
+      {!market.regimes ? <Notice>국면이 꺼져 있습니다(설정).</Notice> : (
+        <p className="mb-2 text-sm">
+          지금: <b className="text-gold-200">{now ? REGIME[now.kind].label : "기록원이 아직 쓰지 않음"}</b>
+          {now?.since && <span className="text-mist"> · {formatDate(now.since.toMillis())}부터</span>}
+          {forced > session.clock.now() && <span className="text-mist"> · 딜러 발동, {formatDate(forced)}까지</span>}
+        </p>
+      )}
+      <p className="mb-2 text-xs text-mist">플레이어는 국면 이름을 보지 못하고 공포·탐욕 지수와 종목들이 함께 움직이는 모양으로 짐작합니다. 발동하면 시세판에 거리의 분위기 한 줄만 뜹니다.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="block">
+          <span className="field-label">국면</span>
+          <select className="field" value={kind} onChange={(event) => setKind(event.target.value as RegimeKind)}>
+            {REGIMES.map((entry) => <option key={entry} value={entry}>{REGIME[entry].label}</option>)}
+          </select>
+        </label>
+        <div className="w-28"><NumberField label="지속 (분)" value={minutes} onChange={setMinutes} min={5} max={1440} /></div>
+        <div className="w-28"><NumberField label="몇 분 뒤" value={delay} onChange={setDelay} min={0} max={10080} /></div>
+        <button type="button" className="btn btn-gold btn-sm mb-0.5" disabled={busy || !market.regimes} onClick={() => void run(() => scheduleRegime(session, kind, minutes, delay))}>국면 발동</button>
+      </div>
+      {orders.status === "ready" && orders.data.length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm">
+          {orders.data.map((row) => (
+            <li key={row.id} className="flex items-center justify-between gap-2 rounded-sm border border-gold-400/20 px-2 py-1">
+              <span>{formatDate(row.data.at?.toMillis?.() ?? 0)} · {REGIME[row.data.kind].label} {row.data.minutes}분</span>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void run(() => cancelRegime(session, row.id))}>취소</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Frame>
   );
 }
 

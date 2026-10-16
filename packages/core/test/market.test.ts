@@ -89,9 +89,10 @@ describe("price engine", () => {
     expect(marketSeed("other", "t:1")).not.toBe(marketSeed(SECRET, "t:1"));
   });
 
-  it("round-trips through the hour document", () => {
+  it("round-trips through the hour document (all but the hidden regime)", () => {
     const state = run(initialMarketState(tickSeq(start, TICK), start), 10, start);
-    expect(stateFromTick(tickFromState(state, "now"), state.atMs)).toEqual(state);
+    const { regime: _hidden, ...open } = state;
+    expect(stateFromTick(tickFromState(state, "now"), state.atMs)).toEqual(open);
   });
 
   it("stays near its anchors over a simulated week", () => {

@@ -1,7 +1,7 @@
 import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Firestore, type Transaction } from "firebase/firestore";
 import {
   COINS, DEFAULT_MARKET, HOUR_MS, KST_OFFSET_MS, entryPaused, weekIndexAt, weeklyLevy, hourIndexAt, leverageChoices, normalizeMarket, periodWords, quoteBuy, quoteClose, quoteOpen, quoteSell,
-  type BuyQuote, type CloseKind, type SellQuote, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
+  type RegimeKind, type BuyQuote, type CloseKind, type SellQuote, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
 } from "@fortuna/core";
 import { FortunaError, writeEntry, type PlayerSession, type Session } from "./ledger-write.ts";
 import { readEconomy, readWallet } from "./player-ops.ts";
@@ -289,4 +289,20 @@ export async function scheduleRate(session: Session, atMs: number, bps: number):
 
 export async function cancelRate(session: Session, id: string): Promise<void> {
   await updateDoc(doc(session.db, "marketEvents", id), { status: "cancelled" });
+}
+
+// ── 거래소 2부 4단계: 국면 발동 ──
+
+/** Start a regime (e.g. a panic before a 간부전) in `delayMinutes`, holding for `minutes`. Players never see its name. */
+export async function scheduleRegime(session: Session, kind: RegimeKind, minutes: number, delayMinutes: number): Promise<string> {
+  if (!Number.isInteger(minutes) || minutes < 5 || minutes > 1_440) throw new FortunaError("minutes", "지속 시간은 5~1440분 사이로 적어 주십시오.");
+  const ref = await addDoc(collection(session.db, "marketRegimes"), {
+    kind, minutes, at: Timestamp.fromMillis(session.clock.now() + Math.max(0, Math.round(delayMinutes * 60_000))), status: "pending", appliedSeq: null, createdAt: serverTimestamp(),
+  });
+  await adminLog(session, "regime", kind, minutes, `국면 발동 예약`);
+  return ref.id;
+}
+
+export async function cancelRegime(session: Session, id: string): Promise<void> {
+  await updateDoc(doc(session.db, "marketRegimes", id), { status: "cancelled" });
 }
