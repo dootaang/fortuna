@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { onSnapshot } from "firebase/firestore";
 import { DISTRICTS, FRONT_DISTRICTS, FRONT_MAX, FRONT_TEXT, HOTEL_RULES, type FrontDistrict, type PlaceId } from "@fortuna/core";
 import {
-  closeRound, districtCoin, giveClue, importLorePack, openFight, playAssist, raiseBoss, refreshBook, saveClue, scheduleNews, setBookRevealed, stepFront, storyRefs,
+  GLOBAL_CHANNEL, closeRound, districtCoin, sendMessage, giveClue, importLorePack, openFight, playAssist, raiseBoss, refreshBook, saveClue, scheduleNews, setBookRevealed, stepFront, storyRefs,
   type ClueDoc, type ClueInput, type LoreImportResult, type SecretNews,
 } from "@fortuna/data";
 import { db } from "../firebase.ts";
@@ -80,12 +80,23 @@ function LoreImport() {
     <Frame>
       <SectionTitle title="이야기 자료 가져오기" />
       <p className="mb-2 text-xs text-mist">
-        자료/fortuna-gm/gemini/lore-pack.json 내용을 그대로 붙여 넣습니다. 단서 카드, 장부 쪽 이름, 조력 카드, NPC 말투 메모, 단서 소문이 딜러만 읽는 곳에 저장됩니다.
+        컴퓨터의 자료/fortuna-gm/gemini/lore-pack.json 파일을 고르면 됩니다. 단서 카드, 장부 쪽 이름, 조력 카드, NPC 말투 메모, 단서 소문, 간부전 대사, 장부 공개 장면이 딜러만 읽는 곳에 저장됩니다.
         다시 가져오면 같은 id는 덮어씁니다(이미 건넨 수첩 카드는 그대로).
       </p>
-      <TextField label="lore-pack.json" value={raw} onChange={setRaw} multiline maxLength={200_000} placeholder='{ "version": 1, "clues": [ … ] }' />
-      <button type="button" className="btn btn-gold btn-sm mt-2" disabled={busy || !raw.trim()} onClick={() => void run(async () => { setResult(await importLorePack(session, raw)); setRaw(""); })}>가져오기</button>
-      {result && <p className="mt-2 text-xs text-gold-200">단서 {result.clues} · 조력 카드 {result.assists} · NPC {result.npcs} · 장부 쪽 이름 {result.titles ? "있음" : "없음"} · 단서 소문 {result.secretNews}</p>}
+      <label className="btn btn-gold btn-sm cursor-pointer">
+        {busy ? "가져오는 중…" : "📂 lore-pack.json 파일 고르기"}
+        <input type="file" accept=".json,application/json" className="sr-only" disabled={busy} onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void run(async () => setResult(await importLorePack(session, await file.text())), "이야기 자료를 가져왔습니다.");
+        }} />
+      </label>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-xs text-mist">파일 대신 내용을 붙여 넣기</summary>
+        <TextField label="lore-pack.json 내용" value={raw} onChange={setRaw} multiline maxLength={200_000} placeholder='{ "version": 1, "clues": [ … ] }' />
+        <button type="button" className="btn btn-dark btn-sm mt-2" disabled={busy || !raw.trim()} onClick={() => void run(async () => { setResult(await importLorePack(session, raw)); setRaw(""); }, "이야기 자료를 가져왔습니다.")}>가져오기</button>
+      </details>
+      {result && <p className="mt-2 text-xs text-gold-200">단서 {result.clues} · 조력 카드 {result.assists} · NPC {result.npcs} · 장부 쪽 이름 {result.titles ? "있음" : "없음"} · 단서 소문 {result.secretNews} · 간부전 대사 {result.fightLines} · 장부 공개 장면 {result.revealScenes}</p>}
     </Frame>
   );
 }
@@ -256,8 +267,34 @@ function BookDesk() {
         </button>
         <button type="button" className="btn btn-dark btn-sm" disabled={busy} onClick={() => void run(() => refreshBook(session), "다시 계산했습니다.")}>지금 다시 계산</button>
       </div>
+      <RevealScenes />
       <LedgerBook book={book} />
     </Frame>
+  );
+}
+
+/** 장부를 공개할 때 쓰는 묘사 (이야기 자료에서): 복사하거나 전체 채팅에 서술로 올린다. */
+function RevealScenes() {
+  const { session } = useDealer();
+  const { busy, run } = useAction();
+  const [items, setItems] = useState<string[]>([]);
+  useEffect(() => onSnapshot(storyRefs.revealScenes(db), (snapshot) => setItems(snapshot.data()?.items ?? []), () => setItems([])), []);
+  if (!items.length) return null;
+  return (
+    <details className="mb-3 rounded-sm border border-gold-400/25 p-2">
+      <summary className="cursor-pointer text-sm text-gold-200">장부 공개 장면 ({items.length}안)</summary>
+      <ul className="mt-2 space-y-3">
+        {items.map((scene, index) => (
+          <li key={index} className="text-sm">
+            <p className="whitespace-pre-line text-ivory/90">{scene}</p>
+            <div className="mt-1 flex gap-2">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void navigator.clipboard?.writeText(scene).catch(() => undefined)}>복사 (디스코드용)</button>
+              <button type="button" className="btn btn-dark btn-sm" disabled={busy} onClick={() => { if (window.confirm("전체 채팅에 서술로 올릴까요?")) void run(() => sendMessage(session, session.uid, { authorKind: "narration" }, GLOBAL_CHANNEL, scene), "올렸습니다."); }}>전체 채팅에 올리기</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

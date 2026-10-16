@@ -35,6 +35,8 @@ const PACK = JSON.stringify({
   pages: { medieval: ["원장", "장부", "셋째 쪽 제목", "차용증", "[파국] 봉쇄"], passenger: "승객 [{name}]의 차용증" },
   npcs: [{ id: "kang-mujin", name: "강무진", district: "modern", memo: "무뚝뚝하다." }],
   secretNews: [{ coin: "LNH", kind: "rumor", tone: "down", text: "비밀 소문" }],
+  fightLines: { medieval: { raise: ["다시 굴려라."], lose: ["크흠."] }, manager: { blank: ["이미 정산이 끝났군요."] } },
+  revealScenes: ["장부가 열린다."],
 });
 
 describe("fronts", () => {
@@ -57,7 +59,8 @@ describe("fronts", () => {
 describe("clues and the lore pack", () => {
   it("imports the pack into dealer-only places", async () => {
     const result = await importLorePack(admin, PACK);
-    expect(result).toEqual({ clues: 2, assists: 1, npcs: 1, titles: true, secretNews: 1 });
+    expect(result).toEqual({ clues: 2, assists: 1, npcs: 1, titles: true, secretNews: 1, fightLines: 3, revealScenes: 1 });
+    await denied(getDoc(storyRefs.fightLines(player.db)));
     expect((await rootData("npcs/kang-mujin/secret/notes"))?.text).toBe("무뚝뚝하다.");
     await denied(getDoc(storyRefs.clue(player.db, "collateral-medieval")));
     await denied(getDoc(storyRefs.bookTitles(player.db)));
@@ -156,6 +159,7 @@ describe("paying a friend's debt", () => {
 
 describe("boss fights", () => {
   it("raises from the boss's vault, scores rounds and decides the fight", async () => {
+    await importLorePack(admin, PACK);
     const id = await openFight(admin, "loen-castle", { title: "", bossName: "마왕", mode: "boss", district: "medieval", rounds: 3, bossVault: 400 });
     await updateDoc(cityRefs.contest(admin.db, id), { bossScore: 3 });
     await raiseBoss(admin, id, DEFAULT_ECONOMY.skill.costs, null);
@@ -167,6 +171,8 @@ describe("boss fights", () => {
     fight = (await rootData(`contests/${id}`))!;
     expect(fight.round).toBe(3);
     expect(fight.log).toHaveLength(3);
+    expect(fight.log[0]).toContain("“다시 굴려라.”");
+    expect(fight.log[1]).toContain("마왕: “크흠.”");
     await denied(updateDoc(cityRefs.contest(player.db, id), { bossScore: 0 }));
   });
 

@@ -20,6 +20,8 @@ export interface AssistDoc { district: string; title: string; effect: AssistEffe
 /** lore/bookTitles (dealer and recorder): page names per district (4 + the black page) and the passenger page pattern. */
 export interface BookTitlesDoc { chapters: Partial<Record<FrontDistrict, string[]>>; passenger: string; }
 export interface SecretNews { coin: CoinId; kind: "official" | "paper" | "rumor"; tone: "up" | "down"; text: string; }
+/** lore/fightLines (dealer only): what each boss says when raising or losing a round, and the manager at a blank page. Keyed by district, "manager" for the final. */
+export type FightLines = Record<string, Partial<Record<"raise" | "lose" | "blank", string[]>>>;
 
 const typed = <T>(ref: DocumentReference) => ref as DocumentReference<T>;
 const typedCollection = <T>(ref: CollectionReference) => ref as CollectionReference<T>;
@@ -35,6 +37,8 @@ export const storyRefs = {
   assists: (db: Firestore) => typedCollection<AssistDoc>(collection(db, "assists")),
   bookTitles: (db: Firestore) => typed<BookTitlesDoc>(doc(db, "lore", "bookTitles")),
   secretNews: (db: Firestore) => typed<{ items: SecretNews[] }>(doc(db, "lore", "secretNews")),
+  fightLines: (db: Firestore) => typed<{ lines: FightLines }>(doc(db, "lore", "fightLines")),
+  revealScenes: (db: Firestore) => typed<{ items: string[] }>(doc(db, "lore", "revealScenes")),
   book: (db: Firestore) => typed<BookDoc<Timestamp>>(doc(db, "book", "main")),
 };
 
@@ -117,13 +121,13 @@ export async function shareClue(session: PlayerSession, clueId: string, to: stri
 
 // ── 이야기 자료 가져오기 (lore pack) ──
 
-export interface LoreImportResult { clues: number; assists: number; npcs: number; titles: boolean; secretNews: number; }
+export interface LoreImportResult { clues: number; assists: number; npcs: number; titles: boolean; secretNews: number; fightLines: number; revealScenes: number; }
 
 /** Import the lore pack (JSON pasted by the dealer). Ids are kept, so importing again overwrites; cards already given stay as they are. */
 export async function importLorePack(session: Session, raw: string): Promise<LoreImportResult> {
   let pack: Record<string, unknown>;
   try { pack = JSON.parse(raw) as Record<string, unknown>; } catch { throw new FortunaError("json", "JSON 형식이 아닙니다. 파일 내용을 그대로 붙여 넣어 주십시오."); }
-  const result: LoreImportResult = { clues: 0, assists: 0, npcs: 0, titles: false, secretNews: 0 };
+  const result: LoreImportResult = { clues: 0, assists: 0, npcs: 0, titles: false, secretNews: 0, fightLines: 0, revealScenes: 0 };
   for (const entry of Array.isArray(pack.clues) ? pack.clues as Record<string, unknown>[] : []) {
     if (typeof entry.id !== "string" || !CLUE_ID.test(entry.id)) continue;
     await saveClue(session, entry.id, {
@@ -159,6 +163,20 @@ export async function importLorePack(session: Session, raw: string): Promise<Lor
       tone: entry.tone === "up" ? "up" as const : "down" as const, text: text(entry.text, 200),
     }));
   if (news.length) { batch.set(storyRefs.secretNews(session.db), { items: news }); result.secretNews = news.length; }
+  const fight = pack.fightLines as Record<string, Record<string, unknown>> | undefined;
+  if (fight && typeof fight === "object") {
+    const lines: FightLines = {};
+    for (const [who, byKind] of Object.entries(fight)) {
+      if (!isDistrict(who) && who !== "manager") continue;
+      for (const kind of ["raise", "lose", "blank"] as const) {
+        const list = Array.isArray(byKind?.[kind]) ? (byKind[kind] as unknown[]).map((line) => text(line, 200)).filter(Boolean) : [];
+        if (list.length) { (lines[who] ??= {})[kind] = list; result.fightLines += list.length; }
+      }
+    }
+    batch.set(storyRefs.fightLines(session.db), { lines });
+  }
+  const scenes = (Array.isArray(pack.revealScenes) ? pack.revealScenes as unknown[] : []).map((scene) => text(scene, 2_000)).filter(Boolean);
+  if (scenes.length) { batch.set(storyRefs.revealScenes(session.db), { items: scenes }); result.revealScenes = scenes.length; }
   await batch.commit();
   for (const entry of Array.isArray(pack.npcs) ? pack.npcs as Record<string, unknown>[] : []) {
     if (typeof entry.id !== "string" || !CLUE_ID.test(entry.id) || !text(entry.name, 40)) continue;
@@ -270,8 +288,17 @@ const say = (session: Session, fight: FightDoc, id: string, line: string, sessio
  * The boss raises by one step and pays the skill cost of the new score from its vault.
  * In the final the manager turns a ledger page for every raise: a blank page and the raise fizzles.
  */
+/** A line for the boss to say (from the imported lore), or "" when there is none. */
+async function bossLine(session: Session, who: string | null, kind: "raise" | "lose" | "blank"): Promise<string> {
+  if (!who) return "";
+  const list = (await getDoc(storyRefs.fightLines(session.db)).catch(() => null))?.data()?.lines?.[who]?.[kind] ?? [];
+  return list.length ? list[Math.floor(Math.random() * list.length)]! : "";
+}
+
 export async function raiseBoss(session: Session, id: string, costs: readonly number[], sessionId: string | null): Promise<string> {
   const fight = await fightOf(session, id);
+  const who = fight.mode === "final" ? "manager" : fight.district;
+  const quote = (line: string) => (line ? ` “${line}”` : "");
   const next = fight.bossScore + 1, cost = costs[next] ?? costs[costs.length - 1] ?? 0, log = [...fight.log];
   let line: string, patch: Partial<FightDoc>;
   if (fight.fizzle > 0) {
@@ -281,15 +308,15 @@ export async function raiseBoss(session: Session, id: string, costs: readonly nu
     const page = fight.pages[fight.pageIndex];
     if (!page) throw new FortunaError("pages", "넘길 쪽이 남지 않았습니다. 지배인은 더 올릴 수 없습니다.");
     if (page.state === "blank") {
-      line = `📄 ${fight.bossName}이(가) 장부를 넘겼다 — 「${page.title}」. 하얀 백지다. 웃돈이 불발됐다.`;
+      line = `📄 ${fight.bossName}이(가) 장부를 넘겼다 — 「${page.title}」. 하얀 백지다. 웃돈이 불발됐다.${quote(await bossLine(session, who, "blank"))}`;
       patch = { pageIndex: fight.pageIndex + 1 };
     } else {
-      line = `📕 ${fight.bossName}이(가) 장부를 넘겨 차용증을 태웠다 — 「${page.title}」. ${next}점.`;
+      line = `📕 ${fight.bossName}이(가) 장부를 넘겨 차용증을 태웠다 — 「${page.title}」. ${next}점.${quote(await bossLine(session, who, "raise"))}`;
       patch = { pageIndex: fight.pageIndex + 1, bossScore: next, bossSpent: fight.bossSpent + cost, bossVault: Math.max(0, fight.bossVault - cost) };
     }
   } else {
     if (fight.bossVault < cost) throw new FortunaError("vault", `${fight.bossName}의 금고가 모자랍니다 (${cost.toLocaleString("ko-KR")}코인 필요).`);
-    line = `💰 ${fight.bossName}이(가) 웃돈을 얹었다 — ${next}점. (${cost.toLocaleString("ko-KR")}코인)`;
+    line = `💰 ${fight.bossName}이(가) 웃돈을 얹었다 — ${next}점. (${cost.toLocaleString("ko-KR")}코인)${quote(await bossLine(session, who, "raise"))}`;
     patch = { bossScore: next, bossSpent: fight.bossSpent + cost, bossVault: fight.bossVault - cost };
   }
   log.push(line);
@@ -304,7 +331,8 @@ export async function closeRound(session: Session, id: string, partyScore: numbe
   const party = partyScore + fight.bonus, verdict = party > fight.bossScore ? "party" : party < fight.bossScore ? "boss" : "draw";
   const wins = { party: fight.wins.party + (verdict === "party" ? 1 : 0), boss: fight.wins.boss + (verdict === "boss" ? 1 : 0) };
   const need = winsNeeded(fight.rounds), decided = wins.party >= need ? "party" : wins.boss >= need ? "boss" : null;
-  const line = `⚔ 제${fight.round}판 — 우리 편 ${party}점 : ${fight.bossName} ${fight.bossScore}점. ${verdict === "party" ? "우리 편 승리" : verdict === "boss" ? `${fight.bossName} 승리` : "무승부"} (${wins.party}:${wins.boss})`;
+  const lost = verdict === "party" ? await bossLine(session, fight.mode === "final" ? "manager" : fight.district, "lose") : "";
+  const line = `⚔ 제${fight.round}판 — 우리 편 ${party}점 : ${fight.bossName} ${fight.bossScore}점. ${verdict === "party" ? "우리 편 승리" : verdict === "boss" ? `${fight.bossName} 승리` : "무승부"} (${wins.party}:${wins.boss})${lost ? ` ${fight.bossName}: “${lost}”` : ""}`;
   await updateDoc(cityRefs.contest(session.db, id), {
     wins, round: fight.round + 1, roundStartedAt: now(), bossScore: 0, bonus: 0, log: [...fight.log, line].slice(-30),
   });
