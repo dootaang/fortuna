@@ -1,5 +1,5 @@
 import {
-  REGIME_ORDER_TEXT, addFunding, creditClaim, dividendFor, holdingValue, coinDistrictLiberated, fundingDue, isRegimeKind, type Regime,
+  REGIME_ORDER_TEXT, buildStats, earningsAt, earningsSeedKey, infoAnswer, infoSeedKey, npcSurprise, addFunding, creditClaim, dividendFor, holdingValue, coinDistrictLiberated, fundingDue, isRegimeKind, type Regime,
   ANALYSTS, COIN_IDS, activityRatio, analystBand, anchorOf, buildStructure, coinForDistrict, debtFactor, fundamentalsInput, playerShare, reportAt, reportSeedKey, weekIndexAt, weekStartMs, foldCandle, heatFactor, hourDocId, hourIndexAt, initialMarketState, isCoinId, marketSeed, minuteKey, normalizeMarket, normalizeNotify,
   seedKeys, stateFromTick, stepMarket, tickFromState, tickSeq, triggerAt,
   type Candle, type CoinId, type OpenLot, type FeedItem, type MarketConfig, type MarketState, type NewsShock, type NewsSize, type TickDoc, type WorldInput,
@@ -130,7 +130,7 @@ function shockOf(doc: Doc): NewsShock | null {
   return { id: doc.id, coin, dir, size: size as NewsSize, minutes: Math.max(1, Math.min(1_440, Number(minutes) || 30)), headline: String(headline ?? "").slice(0, 200) };
 }
 
-export interface TickOptions { world?: World | undefined; news?: Doc[] | undefined; events?: Doc[] | undefined; regimes?: Doc[] | undefined; }
+export interface TickOptions { world?: World | undefined; news?: Doc[] | undefined; events?: Doc[] | undefined; regimes?: Doc[] | undefined; info?: Doc[] | undefined; }
 
 export async function recordTick(recorder: Recorder, atMs: number, options: TickOptions = {}, retry = true): Promise<TickResult> {
   const { fs, config } = recorder, tickMs = config.tickSeconds * 1000;
@@ -189,6 +189,27 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     }
     lots.push({ coin, side, notional, liq: Number(doc.data.liq) });
   }
+
+  // 7단계 시장 통계: once an hour, from the stats document's own short hourly history (one read).
+  let stats: Write | null = null;
+  if (fundingDue(base.atMs, atMs)) {
+    const previous = await fs.get("market/stats").catch(() => null);
+    const prices = Object.fromEntries(COIN_IDS.map((coin) => [coin, state.coins[coin].p])) as Record<CoinId, number>;
+    const next = buildStats(previous ? { hourly: previous.data.hourly as Record<CoinId, number[]>, domHistory: previous.data.domHistory as number[] } : null, prices, new Stamp(atMs));
+    stats = { update: { name: fs.name("market/stats"), fields: encodeFields({ ...next }) } };
+  }
+
+  // 7단계 정보 구매: answer what players paid for (hints only; the answer is right with the product's accuracy).
+  const answers = (options.info ?? []).filter((doc) => isCoinId(doc.data.coin) && (doc.data.kind === "rumor" || doc.data.kind === "peek")).map((doc) => {
+    const coin = doc.data.coin as CoinId, kind = doc.data.kind as "rumor" | "peek", tick = state.coins[coin];
+    let truth: boolean | null = null;
+    if (kind === "rumor") truth = tick.an && tick.an.source === "rumor" ? tick.an.truth : null;
+    else {
+      const thisWeek = weekIndexAt(atMs), week = earningsAt(coin, thisWeek) > atMs ? thisWeek : thisWeek + 1;
+      truth = npcSurprise(sign(earningsSeedKey(coin, week))) + (tick.spc ?? 0) > 0;
+    }
+    return { doc, text: infoAnswer(kind, coin, truth, sign(infoSeedKey(doc.id))) };
+  });
 
   // 6단계 배당: at each announcement, credit spot holders of that coin (capped weekly per player).
   const dividends: Write[] = [];
@@ -252,6 +273,11 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     ...whispers.map((doc) => ({ update: { name: doc.name, fields: encodeFields({ whispered: true }) }, updateMask: { fieldPaths: ["whispered"] }, currentDocument: { updateTime: doc.updateTime } })),
     ...reports,
     ...dividends,
+    ...answers.map(({ doc, text }) => ({
+      update: { name: doc.name, fields: encodeFields({ status: "answered", answer: text, answeredAt: new Stamp(atMs) }) },
+      updateMask: { fieldPaths: ["status", "answer", "answeredAt"] }, currentDocument: { updateTime: doc.updateTime },
+    })),
+    ...(stats ? [stats] : []),
     ...(orderDoc ? [{ update: { name: orderDoc.name, fields: encodeFields({ status: "done", appliedSeq: seq }) }, updateMask: { fieldPaths: ["status", "appliedSeq"] }, currentDocument: { updateTime: orderDoc.updateTime } }] : []),
     ...(state.regime && (state.regime.since !== base.regime?.since || state.regime.kind !== base.regime?.kind || !base.regime) ? [{
       update: {
@@ -285,6 +311,7 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     const times = await fs.commit(writes);
     recorder.state = state; recorder.hour = hour; recorder.minute = minute; recorder.candle = candle; recorder.hourUpdateTime = times[0] ?? null;
     if (orderDoc) options.regimes?.splice(options.regimes.indexOf(orderDoc), 1);
+    if (options.info) options.info.splice(0, options.info.length);
     if (rateDoc && rate) {
       recorder.config = { ...recorder.config, interestBps: rate.toBps };
       options.events?.splice(options.events.indexOf(rateDoc), 1);
@@ -305,6 +332,7 @@ export async function recordTick(recorder: Recorder, atMs: number, options: Tick
     const news = options.news ? await fs.query("marketNews", { status: "pending" }) : undefined;
     if (options.events) options.events.splice(0, options.events.length, ...(await fs.query("marketEvents", { status: "pending" }).catch(() => [])));
     if (options.regimes) options.regimes.splice(0, options.regimes.length, ...(await fs.query("marketRegimes", { status: "pending" }).catch(() => [])));
+    if (options.info) options.info.splice(0, options.info.length, ...(await fs.query("infoRequests", { status: "pending" }).catch(() => [])));
     if (options.news && news) options.news.splice(0, options.news.length, ...news);
     return recordTick(recorder, atMs, { ...options, news: options.news }, false);
   }
@@ -339,6 +367,7 @@ export class TickRunner {
   private news: Doc[] = [];
   private events: Doc[] = [];
   private regimes: Doc[] = [];
+  private info: Doc[] = [];
   private posted = { day: -1, count: 0 };
   private notify = normalizeNotify(undefined);
   private minuteChecked = -1;
@@ -386,14 +415,16 @@ export class TickRunner {
     if (!this.recorder || minute !== this.minuteChecked) {
       if (!this.recorder) this.recorder = await loadRecorder(fs, this.env.MARKET_SECRET, nowMs);
       else this.recorder.config = normalizeMarket((await fs.get("config/market"))?.data);
-      const [news, notify, events, regimes] = await Promise.all([
+      const [news, notify, events, regimes, info] = await Promise.all([
         fs.query("marketNews", { status: "pending" }).catch(() => this.news), fs.get("config/notify").catch(() => null),
         fs.query("marketEvents", { status: "pending" }).catch(() => this.events),
         fs.query("marketRegimes", { status: "pending" }).catch(() => this.regimes),
+        fs.query("infoRequests", { status: "pending" }).catch(() => this.info),
       ]);
       this.news = news;
       this.events = events;
       this.regimes = regimes;
+      this.info = info;
       this.notify = normalizeNotify(notify?.data);
       this.minuteChecked = minute;
     }
@@ -408,7 +439,7 @@ export class TickRunner {
       world = await observeWorld(fs, at).catch((error) => { console.error("observe", error); return undefined; });
       this.worldChecked = tenth;
     }
-    const result = await recordTick(recorder, at, { world, news: this.news, events: this.events, regimes: this.regimes });
+    const result = await recordTick(recorder, at, { world, news: this.news, events: this.events, regimes: this.regimes, info: this.info });
     if (result.status === "written") await this.announce(result.feed);
     return result;
   }

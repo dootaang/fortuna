@@ -232,6 +232,7 @@ service cloud.firestore {
         || (e.type == 'spotBuy' && spotBuyOk(entryId, e, before, after))
         || (e.type == 'spotSell' && spotSellOk(entryId, e, before, after))
         || (e.type == 'dividend' && dividendOk(entryId, e, before, after))
+        || (e.type == 'marketInfo' && marketInfoOk(entryId, e, before, after))
       );
     }
 
@@ -998,6 +999,34 @@ service cloud.firestore {
         && c1.claimed == c0.total && c1.lastLedger == entryId
         && e.delta == d.amount && e.debtDelta == 0 && e.vaultDelta == -d.amount
         && onlyChanged(before, after, ['balance', 'seq']);
+    }
+
+    // ── 정보 구매 (거래소 2부 7단계) ── 값을 내면 요청 문서가 함께 생기고, 기록원이 답을 쓴다.
+    match /infoRequests/{id} {
+      allow get, list: if isAdmin() || isOracle() || (signedIn() && exists(bindingPath()) && resource.data.playerId == myPid() && isPlayer(myPid()));
+      allow create: if signedIn() && ledgerCreatedNow(id) && getAfter(ledgerPath(id)).data.type == 'marketInfo'
+        && request.resource.data == {'playerId': getAfter(ledgerPath(id)).data.playerId, 'kind': getAfter(ledgerPath(id)).data.detail.kind,
+            'coin': getAfter(ledgerPath(id)).data.detail.coin, 'status': 'pending', 'answer': null, 'createdAt': request.time, 'answeredAt': null};
+      allow update: if isOracle() && resource.data.status == 'pending' && onlyChanged(resource.data, request.resource.data, ['status', 'answer', 'answeredAt'])
+        && request.resource.data.status == 'answered' && request.resource.data.answer is string;
+      allow delete: if false;
+    }
+
+    function marketInfoOk(entryId, e, before, after) {
+      let d = e.detail;
+      let m = marketConfig();
+      let info = m.get('info', {'enabled': true, 'rumorPrice': 200, 'peekPrice': 200, 'dailyLimit': 2});
+      let econ = get(configPath()).data;
+      let i0 = before.get('info', {'period': -1, 'used': 0});
+      let period = curPeriod(econ.get('limitPeriod', 'day'));
+      let used = (i0.period == period ? i0.used : 0) + 1;
+      return d.keys().hasOnly(['kind', 'coin', 'price']) && info.enabled == true
+        && d.kind in ['rumor', 'peek'] && d.coin in ['FTN', 'WHL', 'HBT', 'LNH', 'JWN', 'S9', 'ORB', 'BLC', 'MWL']
+        && d.price == (d.kind == 'rumor' ? info.rumorPrice : info.peekPrice)
+        && e.delta == -d.price && e.debtDelta == 0 && e.vaultDelta == d.price
+        && after.info == {'period': period, 'used': used} && used <= info.dailyLimit
+        && onlyChanged(before, after, ['balance', 'seq', 'info'])
+        && existsAfter(/databases/$(database)/documents/infoRequests/$(entryId));
     }
 
     // ── 현물 ── 보유량은 1/10000개 단위(units), 가격은 1/100 단위. 금액 = units × 가격 / 1,000,000.

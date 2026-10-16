@@ -269,6 +269,10 @@ function MarketEditor({ market }: { market: MarketConfig }) {
           <Toggle label="구역 실적·리포트" checked={draft.earnings} onChange={(earnings) => set({ earnings })} hint="매일 21시 실적 발표, 다음 날 정오 리포트. 끄면 기준가 배율은 그대로 멈춥니다." />
           <Toggle label="펀딩비" checked={draft.funding} onChange={(funding) => set({ funding })} hint="매 정시, 쏠린 쪽이 시간당 최대 0.1%를 내고 반대쪽이 받습니다." />
           <Toggle label="청산 연쇄" checked={draft.cascade} onChange={(cascade) => set({ cascade })} hint="주민 군중이 강제 청산되면 같은 틱에 가격이 그쪽으로 한 번 더 밀립니다(최대 0.5%)." />
+          <Toggle label="정보 구매" checked={draft.info.enabled} onChange={(enabled) => set({ info: { ...draft.info, enabled } })} hint="시장 정보 탭의 소문 감정서(75%)와 장부 엿보기(70%)." />
+          <NumberField label="소문 감정서 값" value={draft.info.rumorPrice} onChange={(rumorPrice) => set({ info: { ...draft.info, rumorPrice } })} min={1} suffix="코인" />
+          <NumberField label="장부 엿보기 값" value={draft.info.peekPrice} onChange={(peekPrice) => set({ info: { ...draft.info, peekPrice } })} min={1} suffix="코인" />
+          <NumberField label="정보 구매 하루 한도" value={draft.info.dailyLimit} onChange={(dailyLimit) => set({ info: { ...draft.info, dailyLimit } })} min={0} max={50} />
           <Toggle label="배당" checked={draft.dividends} onChange={(dividends) => set({ dividends })} hint="실적 발표 때 현물 보유 평가액 × 주 1% × 실적 배율(해방 구역 ×2). 한 사람 한 주 200코인까지." />
           <Toggle label="숨은 국면" checked={draft.regimes} onChange={(regimes) => set({ regimes })} hint="횡보·상승장·하락장·공포·알트 시즌. 끄면 늘 횡보입니다." />
           <Toggle label="자동 뉴스" checked={draft.autoNews} onChange={(autoNews) => set({ autoNews })} hint="종목마다 하루 3건쯤: 공식(늘 사실) · 신문(80%) · 골목 소문(60%). 종목별로도 끌 수 있습니다." />

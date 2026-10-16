@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, limit, orderBy, query, where, type CollectionReference, type DocumentReference, type Timestamp } from "firebase/firestore";
-import { COIN_IDS, DEFAULT_MARKET, hourIndexAt, normalizeMarket, type CoinId, type DividendClaim, type FundamentalsDoc, type HourDoc, type MarketConfig, type RateEventDoc, type ReportDoc, type TickDoc } from "@fortuna/core";
+import { COIN_IDS, DEFAULT_MARKET, hourIndexAt, normalizeMarket, type CoinId, type DividendClaim, type InfoRequest, type FundamentalsDoc, type HourDoc, type MarketConfig, type RateEventDoc, type ReportDoc, type StatsDoc, type TickDoc } from "@fortuna/core";
 import { refs, settleEndedPositions, type FeedDoc, type HoldingDoc, type PositionDoc } from "@fortuna/data";
 import { db } from "../firebase.ts";
 import { usePlayer } from "../session/player.tsx";
@@ -172,5 +172,18 @@ export function useDividendClaims(): Row<DividendClaim<Timestamp>>[] {
   const { session } = usePlayer();
   const live = useLiveQuery(query(collection(db, "dividendClaims") as CollectionReference<DividendClaim<Timestamp>>, where("playerId", "==", session.pid)), `dividends:${session.pid}`);
   return useMemo(() => (live.status === "ready" ? live.data.filter((row) => row.data.total > row.data.claimed) : []), [live]);
+}
+
+/** market/stats: dominance, sectors and correlations (7단계), rewritten every hour. */
+export function useStats(): StatsDoc<Timestamp> | null {
+  const live = useLiveDoc(doc(db, "market", "stats") as DocumentReference<StatsDoc<Timestamp>>, "market:stats");
+  return live.status === "ready" ? live.data : null;
+}
+
+/** My bought hints, newest first (7단계 정보 구매). */
+export function useInfoRequests(): Row<InfoRequest<Timestamp>>[] {
+  const { session } = usePlayer();
+  const live = useLiveQuery(query(collection(db, "infoRequests") as CollectionReference<InfoRequest<Timestamp>>, where("playerId", "==", session.pid)), `info:${session.pid}`);
+  return useMemo(() => (live.status === "ready" ? [...live.data].sort((a, b) => (b.data.createdAt?.toMillis?.() ?? Date.now()) - (a.data.createdAt?.toMillis?.() ?? Date.now())).slice(0, 10) : []), [live]);
 }
 

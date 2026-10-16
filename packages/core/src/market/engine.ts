@@ -6,6 +6,7 @@ import { COIN_IDS, COINS, coinForDistrict, isMoonlessNight, type CoinId } from "
 import type { MarketConfig } from "./config.ts";
 import { FEED_TEXT, NEWS_SIZES, liberationFeed, type FeedItem, type NewsSize } from "./feed.ts";
 import { cascadeMove, crowdSeed, initialCrowd, liquidateCrowd, stepCrowd, usualSigma, type Crowd } from "./crowd.ts";
+import { SECTOR_IDS, noiseWeights, sectorOf, type SectorId } from "./stats.ts";
 import { initialRegime, regimeEffect, regimeSeed, stepRegime, type Regime, type RegimeKind } from "./regime.ts";
 import { NEWS_FACTOR_HOURS, newsSeed, stepAutoNews, type PendingNews } from "./autonews.ts";
 import { PEAD, PEAD_HOURS, PRE_BAKE, earningsAt, earningsFeed, earningsJump, heatShare, nextFf, rateFeed, rateShock } from "./fundamentals.ts";
@@ -260,6 +261,9 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
     ...(regime ? { regime } : {}),
   };
   const common = normal(rng);
+  // 7단계 섹터: one shared draw per sector (its own stream, so the other draws stay as they were).
+  const sectorRng = new XorShift32((input.seeds.tick ^ 0x3c6ef372) >>> 0);
+  const sectorNoise = Object.fromEntries(SECTOR_IDS.map((id) => [id, normal(sectorRng)])) as Record<SectorId, number>;
   // The crowd draws from its own stream so the price path stays exactly as before.
   const crowdRng = new XorShift32(crowdSeed(input.seeds.tick));
   const npc = config.npc ?? { enabled: true, scale: 1 };
@@ -304,7 +308,10 @@ export function stepMarket(state: MarketState, input: StepInput): StepResult {
     }
     const vol = def.volH * (config.coins[id]?.volMult ?? 1) * (storm ? 2.5 : 1) * boost.boost * night * tense * Math.sqrt(hours);
     const mood = regimeEffect(regime, id, def.beta);
-    const e = id === "FTN" ? common : mood.beta * common + Math.sqrt(1 - mood.beta * mood.beta) * mood.ownVol * normal(rng);
+    const sector = sectorOf(id), weights = noiseWeights(mood.beta);
+    const e = id === "FTN" ? common
+      : sector ? weights.common * common + weights.sector * sectorNoise[sector] + weights.own * mood.ownVol * normal(rng)
+      : mood.beta * common + Math.sqrt(1 - mood.beta * mood.beta) * mood.ownVol * normal(rng);
     const noise = vol * e;
     let r = noise - (vol * vol) / 2 + def.revertH * hours * Math.log(anchor / cs.p) + def.momentum * cs.mom;
     if (rng.next() < (def.jumpsPerDay * hours) / 24) {

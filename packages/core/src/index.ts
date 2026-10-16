@@ -23,6 +23,8 @@ export * from "./market/autonews.ts";
 export * from "./market/regime.ts";
 export * from "./market/funding.ts";
 export * from "./market/dividend.ts";
+export * from "./market/stats.ts";
+export * from "./market/info.ts";
 export * from "./market/feed.ts";
 export * from "./market/engine.ts";
 export * from "./market/tape.ts";

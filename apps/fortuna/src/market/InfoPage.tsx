@@ -1,14 +1,18 @@
 import { Link } from "react-router";
 import {
-  ANALYSTS, COINS, COIN_IDS, consensus, earningsIndex, moodWords, nextEarnings, weekCalendar, weekIndexAt,
-  type CoinId, type FundamentalsDoc, type TickDoc,
+  ANALYSTS, COINS, COIN_IDS, INFO_PRODUCTS, SECTORS, SECTOR_IDS, consensus, earningsIndex, moodWords, nextEarnings, weekCalendar, weekIndexAt,
+  type CoinId, type InfoKind, type FundamentalsDoc, type StatsDoc, type TickDoc,
 } from "@fortuna/core";
 import type { Timestamp } from "firebase/firestore";
 import { usePlayer } from "../session/player.tsx";
 import { Frame, PageTitle, cx } from "../ui/kit.tsx";
 import { VenueTabs } from "../pages/VenueList.tsx";
 import { CoinBadge, FearGreedGauge, priceText } from "./pieces.tsx";
-import { latestReports, useFundamentals, useRateEvents, useReports, useTape } from "./useMarket.ts";
+import { latestReports, useFundamentals, useInfoRequests, useMarketConfig, useRateEvents, useReports, useStats, useTape } from "./useMarket.ts";
+import { useState } from "react";
+import { buyInfo } from "@fortuna/data";
+import { Coins, useAction, useToast } from "../ui/kit.tsx";
+import { cue } from "../fx/cues.ts";
 import "./market.css";
 
 /**
@@ -42,6 +46,8 @@ export default function InfoPage() {
         </Frame>
       )}
 
+      <StatsPanels />
+
       <Frame className="mb-4">
         <h2 className="deco-title mb-2 text-lg">이번 주 일정</h2>
         <ul className="space-y-1 text-sm">
@@ -68,6 +74,8 @@ export default function InfoPage() {
           업계 분위기는 흐린 단서이고, 발표가 가까울수록 덜 흐려집니다. 휠 광장은 도박 판 열기, FTN은 도시 전체 주민으로 셉니다.
         </p>
       </section>
+
+      <InfoShop />
 
       <section aria-label="리포트">
         <h2 className="deco-title mb-2 text-lg">애널리스트 리포트</h2>
@@ -124,3 +132,133 @@ function EarningsRow({ coin, tick, fundamentals, nowMs }: { coin: CoinId; tick: 
     </li>
   );
 }
+
+/** 도미넌스 · 섹터 · 상관계수 (7단계). */
+function StatsPanels() {
+  const stats = useStats();
+  if (!stats) return null;
+  return (
+    <>
+      <Frame className="mb-4">
+        <h2 className="deco-title mb-1 text-lg">FTN 도미넌스 <span className="num text-gold-200">{(stats.dominance * 100).toFixed(1)}%</span></h2>
+        <p className="mb-2 text-xs text-mist">도시 전체 시가총액 가운데 FTN의 몫. 빠지기 시작하면 돈이 구역 코인으로 옮겨 가는 중이라는 뜻일 수 있다.</p>
+        <DominanceLine values={stats.domHistory} />
+      </Frame>
+
+      <Frame className="mb-4">
+        <h2 className="deco-title mb-2 text-lg">섹터 24시간</h2>
+        <div className="grid grid-cols-3 gap-2">
+          {SECTOR_IDS.map((id) => {
+            const change = stats.sectors[id];
+            return (
+              <div key={id} className={cx("rounded-sm border p-2 text-center", change > 0.002 ? "border-[#4fc08d]/50 bg-[#4fc08d]/15" : change < -0.002 ? "border-[#c4473a]/50 bg-[#c4473a]/15" : "border-gold-400/20")}>
+                <p className="text-sm font-bold">{SECTORS[id].label}</p>
+                <p className={cx("num text-sm", change > 0 ? "tone-up" : change < 0 ? "tone-down" : "")}>{change > 0 ? "+" : ""}{(change * 100).toFixed(2)}%</p>
+                <p className="text-[0.65rem] text-mist">{SECTORS[id].coins.join(" · ")}</p>
+              </div>
+            );
+          })}
+        </div>
+      </Frame>
+
+      <Frame className="mb-4">
+        <h2 className="deco-title mb-1 text-lg">함께 움직이는 정도</h2>
+        <p className="mb-2 text-xs text-mist">최근 3일 시간별 등락의 상관계수. 진할수록 같이 움직인다. 칸이 전부 진해지면 시장이 한 몸처럼 움직이는 중이다.</p>
+        <CorrelationGrid corr={stats.corr} />
+      </Frame>
+    </>
+  );
+}
+
+function DominanceLine({ values }: { values: number[] }) {
+  if (values.length < 2) return <p className="text-xs text-mist">기록이 쌓이는 중입니다.</p>;
+  const min = Math.min(...values), max = Math.max(...values), span = Math.max(0.005, max - min);
+  const path = values.map((value, index) => `${(index / (values.length - 1)) * 300},${58 - ((value - min) / span) * 52}`).join(" ");
+  const day = values.length > 24 ? values.at(-1)! - values.at(-25)! : null, week = values.at(-1)! - values[0]!;
+  return (
+    <div>
+      <svg viewBox="0 0 300 60" className="h-16 w-full" role="img" aria-label="FTN 도미넌스 추이">
+        <polyline points={path} fill="none" stroke="#e6c564" strokeWidth="1.5" strokeLinejoin="round" />
+      </svg>
+      <p className="text-xs text-mist">
+        {day !== null && <>24시간 <span className={cx("num", day > 0 ? "tone-up" : day < 0 ? "tone-down" : "")}>{day > 0 ? "+" : ""}{(day * 100).toFixed(1)}%p</span> · </>}
+        {Math.round(values.length / 24)}일 <span className={cx("num", week > 0 ? "tone-up" : week < 0 ? "tone-down" : "")}>{week > 0 ? "+" : ""}{(week * 100).toFixed(1)}%p</span>
+      </p>
+    </div>
+  );
+}
+
+function CorrelationGrid({ corr }: { corr: Record<CoinId, number[]> }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="num mx-auto text-[0.65rem]">
+        <thead>
+          <tr><th />{COIN_IDS.map((id) => <th key={id} className="px-0.5 font-normal" style={{ color: COINS[id].accent }}>{id}</th>)}</tr>
+        </thead>
+        <tbody>
+          {COIN_IDS.map((row, i) => (
+            <tr key={row}>
+              <th className="pr-1 text-right font-normal" style={{ color: COINS[row].accent }}>{row}</th>
+              {COIN_IDS.map((col, j) => {
+                const value = corr[row]?.[j] ?? 0;
+                return (
+                  <td key={col} className="h-7 w-8 text-center" title={`${row}–${col} ${value.toFixed(2)}`}
+                    style={{ background: value >= 0 ? `rgba(212,175,55,${Math.min(1, Math.abs(value)) * 0.75})` : `rgba(127,183,217,${Math.min(1, Math.abs(value)) * 0.75})`, color: Math.abs(value) > 0.55 ? "#0b0809" : undefined }}>
+                    {i === j ? "" : value.toFixed(1)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 정보 구매 (7단계): paid hints answered by the recorder within about a minute. */
+function InfoShop() {
+  const { session } = usePlayer();
+  const { config: market } = useMarketConfig();
+  const requests = useInfoRequests();
+  const [coin, setCoin] = useState<CoinId>("LNH");
+  const { busy, run } = useAction();
+  const toast = useToast();
+  if (!market.info.enabled) return null;
+  async function buy(kind: InfoKind) {
+    const id = await run(() => buyInfo(session, kind, coin));
+    if (id) { cue("chip"); toast("success", `${INFO_PRODUCTS[kind].name}를 샀습니다. 곧 답이 옵니다.`); }
+  }
+  return (
+    <Frame className="mb-4">
+      <h2 className="deco-title mb-1 text-lg">정보 사기</h2>
+      <p className="mb-2 text-xs text-mist">확률로만 맞는 귀띔입니다. {market.info.dailyLimit}건까지 살 수 있고, 답은 1분쯤 뒤에 옵니다.</p>
+      <label className="mb-2 block">
+        <span className="field-label">종목</span>
+        <select className="field" value={coin} onChange={(event) => setCoin(event.target.value as CoinId)}>
+          {COIN_IDS.map((id) => <option key={id} value={id}>{id} · {COINS[id].place}</option>)}
+        </select>
+      </label>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {(["rumor", "peek"] as const).map((kind) => (
+          <div key={kind} className="rounded-sm border border-gold-400/25 p-2">
+            <p className="font-bold">{INFO_PRODUCTS[kind].name} <Coins value={kind === "rumor" ? market.info.rumorPrice : market.info.peekPrice} /></p>
+            <p className="mt-0.5 text-xs text-mist">{INFO_PRODUCTS[kind].blurb}</p>
+            <button type="button" className="btn btn-dark btn-sm mt-2 w-full" disabled={busy} onClick={() => void buy(kind)}>{coin} {INFO_PRODUCTS[kind].name} 사기</button>
+          </div>
+        ))}
+      </div>
+      {requests.length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm" aria-label="받은 답">
+          {requests.map((row) => (
+            <li key={row.id} className="rounded-sm bg-ink/40 px-2 py-1">
+              <span className="text-[0.7rem] text-mist">{row.data.coin} · {INFO_PRODUCTS[row.data.kind].name} · </span>
+              {row.data.answer ?? <span className="text-mist">답을 기다리는 중…</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Frame>
+  );
+}
+

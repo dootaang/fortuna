@@ -42,6 +42,9 @@ test("exchange: board, chart, leveraged long with the loan slip, close", async (
   await expect(page.getByLabel("구역 실적판")).toContainText("로엔하임");
   await expect(page.getByLabel("구역 실적판")).toContainText(/보통 대비|플레이어 주민 없음/);
   await page.waitForTimeout(800);
+  // 정보 구매: a ledger peek, answered by the recorder.
+  await page.getByRole("button", { name: "LNH 장부 엿보기 사기" }).click();
+  await expect(page.getByText("장부 엿보기를 샀습니다. 곧 답이 옵니다.")).toBeVisible();
   await page.screenshot({ path: "test-results/shots/37-market-info.png", fullPage: true, animations: "disabled" });
   await page.getByRole("link", { name: "← 시세판" }).click();
 

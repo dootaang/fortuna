@@ -65,6 +65,8 @@ export interface MarketConfig {
   dividends: boolean;
   /** 6-4 보유 특전: a line shown to holders of at least `minUnits` (1/10,000 coin), per coin; dealer-written. */
   perks: Partial<Record<CoinId, { minUnits: number; text: string }>>;
+  /** 7단계 정보 구매: prices and a daily limit per player (limitPeriod). */
+  info: { enabled: boolean; rumorPrice: number; peekPrice: number; dailyLimit: number };
 }
 
 export const DEFAULT_MARKET: MarketConfig = {
@@ -95,6 +97,7 @@ export const DEFAULT_MARKET: MarketConfig = {
   cascade: true,
   dividends: true,
   perks: {},
+  info: { enabled: true, rumorPrice: 200, peekPrice: 200, dailyLimit: 2 },
 };
 
 const int = (value: unknown, fallback: number, min = 0, max = 1e9) => Math.round(numberOr(value, fallback, min, max));
@@ -141,6 +144,13 @@ export function normalizeMarket(raw: unknown): MarketConfig {
     funding: bool(source.funding, d.funding),
     cascade: bool(source.cascade, d.cascade),
     dividends: bool(source.dividends, d.dividends),
+    info: (() => {
+      const info = isRecord(source.info) ? source.info : {};
+      return {
+        enabled: bool(info.enabled, d.info.enabled), rumorPrice: int(info.rumorPrice, d.info.rumorPrice, 1, 100_000),
+        peekPrice: int(info.peekPrice, d.info.peekPrice, 1, 100_000), dailyLimit: int(info.dailyLimit, d.info.dailyLimit, 0, 50),
+      };
+    })(),
     perks: Object.fromEntries(COIN_IDS.flatMap((id) => {
       const perk = isRecord(source.perks) && isRecord(source.perks[id]) ? source.perks[id] : null;
       return perk && typeof perk.text === "string" && perk.text.trim() ? [[id, { minUnits: int(perk.minUnits, 10_000, 1), text: perk.text.trim().slice(0, 200) }]] : [];

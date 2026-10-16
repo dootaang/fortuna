@@ -367,3 +367,39 @@ describe("dividends (6단계)", () => {
     expect(creditClaim(second, "S9", 10).added).toBe(0);
   });
 });
+
+describe("sectors, dominance and correlations (7단계)", () => {
+  it("starts dominance near 50%, moves sector peers together, and builds the hourly stats", async () => {
+    const { dominance, buildStats, noiseWeights, COINS } = await import("../src/index.ts");
+    const anchors = Object.fromEntries(COIN_IDS.map((id) => [id, COINS[id].anchor])) as Record<CoinId, number>;
+    expect(dominance(anchors)).toBeCloseTo(0.5, 1);
+    const w = noiseWeights(0.95);
+    expect(w.common ** 2 + w.sector ** 2).toBeLessThanOrEqual(0.95 + 1e-9);
+    // A simulated day of 1-minute closes.
+    const start = Date.UTC(2026, 9, 12, 3, 0);
+    let state = initialMarketState(tickSeq(start, 60), start);
+    let stats: ReturnType<typeof buildStats> | null = null;
+    const minute = Object.fromEntries(COIN_IDS.map((id) => [id, [] as number[]])) as Record<CoinId, number[]>;
+    for (let index = 1; index <= 6 * 1_440; index += 1) {
+      const atMs = start + index * 60_000, seq = state.seq + 1, keys = seedKeys(seq, atMs, 60);
+      state = stepMarket(state, { seq, atMs, seeds: { tick: marketSeed(SECRET, keys.tick), blcNow: marketSeed(SECRET, keys.blcNow), blcPast: marketSeed(SECRET, keys.blcPast), s9Week: marketSeed(SECRET, keys.s9Week) }, config: { ...DEFAULT_MARKET, tickSeconds: 60, regimes: false, autoNews: false } }).state;
+      for (const id of COIN_IDS) minute[id].push(Math.log(state.coins[id].p));
+      if (index % 60 === 0) stats = buildStats(stats, Object.fromEntries(COIN_IDS.map((id) => [id, state.coins[id].p])) as Record<CoinId, number>, atMs);
+    }
+    if (!stats) throw new Error("no stats");
+    const { correlation } = await import("../src/index.ts");
+    const diff = (series: number[]) => series.slice(1).map((value, i) => value - series[i]!);
+    const at = (a: CoinId, b: CoinId) => correlation(diff(minute[a]), diff(minute[b]));
+    expect(Object.keys(stats.corr)).toHaveLength(9);
+    expect(stats.corr.FTN[0]).toBe(1);
+    // Peers in a sector move together more than coins from different sectors (on average; single pairs are noisy).
+    const { sectorOf } = await import("../src/index.ts");
+    const alts = COIN_IDS.filter((id) => id !== "FTN"), same: number[] = [], cross: number[] = [];
+    for (const a of alts) for (const b of alts) if (a < b) (sectorOf(a) === sectorOf(b) ? same : cross).push(at(a, b));
+    const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+    expect(mean(same)).toBeGreaterThan(mean(cross) + 0.05);
+    expect(stats.domHistory).toHaveLength(144);
+    expect(stats.hourly.FTN).toHaveLength(144);
+    expect(Object.keys(stats.sectors).sort()).toEqual(["new", "night", "old"]);
+  }, 120_000);
+});

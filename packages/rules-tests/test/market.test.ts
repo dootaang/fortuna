@@ -3,7 +3,7 @@ import { getAuth } from "firebase/auth";
 import { deleteField, doc, getDoc, runTransaction, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
 import { DEFAULT_MARKET, earningsAt, normalizeEconomy, quoteBuy, quoteClose, quoteOpen, quoteSell, reportAt, weekIndexAt, type CoinId } from "@fortuna/core";
 import {
-  announceBossFight, arrive, buySpot, scheduleRate, cancelRate, scheduleRegime, cancelRegime, claimDividend, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
+  announceBossFight, arrive, buySpot, scheduleRate, cancelRate, scheduleRegime, cancelRegime, claimDividend, buyInfo, closePosition, openPosition, sellSpot, setCoinPaused, setDistrict, readLatestTick, readWallet, refs, registerOracle, saveEconomy, saveMarket, scheduleNews, settleEndedPositions, voidPosition, writeEntry,
   type PlayerSession, type Session,
 } from "@fortuna/data";
 import { FirestoreRest } from "../../../apps/notifier/src/firestore-rest.ts";
@@ -467,6 +467,32 @@ describe("dividends (거래소 2부 6단계)", () => {
     // Players cannot write claims for themselves.
     await denied(setDoc(doc(player.db, "dividendClaims", `${week + 1}_${player.pid}`), { playerId: player.pid, week: week + 1, items: { LNH: 200 }, total: 200, claimed: 0, at: serverTimestamp(), lastLedger: null }));
     await denied(updateDoc(doc(player.db, "dividendClaims", claimId), { total: 200 }));
+  });
+});
+
+describe("stats and information (거래소 2부 7단계)", () => {
+  it("writes market stats at the full hour and answers a paid hint", async () => {
+    // Cross a full hour so the recorder writes market/stats.
+    clockMs = Math.ceil((clockMs + 1) / 3_600_000) * 3_600_000 - 5_000;
+    await tick();
+    const stats = (await rootData("market/stats"))!;
+    expect(Object.keys(stats.corr)).toHaveLength(9);
+    expect(stats.dominance).toBeGreaterThan(0.2);
+    expect(stats.hourly.FTN.length).toBeGreaterThanOrEqual(1);
+
+    const balance0 = (await rootData(`wallets/${player.pid}`))!.balance;
+    const requestId = await buyInfo(player, "peek", "LNH");
+    expect((await rootData(`wallets/${player.pid}`))!.balance).toBe(balance0 - 200);
+    await buyInfo(player, "rumor", "HBT");
+    await expect(buyInfo(player, "peek", "S9")).rejects.toMatchObject({ code: "info-limit" });
+    const rest = await oracleRest(oracle);
+    await tick({ info: await rest.query("infoRequests", { status: "pending" }) });
+    const answered = (await rootData(`infoRequests/${requestId}`))!;
+    expect(answered.status).toBe("answered");
+    expect(answered.answer).toMatch(/로엔하임/);
+    // Players cannot forge a request or answer one.
+    await denied(setDoc(doc(player.db, "infoRequests", "free"), { playerId: player.pid, kind: "peek", coin: "LNH", status: "pending", answer: null, createdAt: serverTimestamp(), answeredAt: null }));
+    await denied(updateDoc(doc(player.db, "infoRequests", requestId), { answer: "hacked" }));
   });
 });
 

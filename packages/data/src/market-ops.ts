@@ -1,7 +1,7 @@
 import { Timestamp, addDoc, collection, doc, getDoc, type DocumentReference, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, type Firestore, type Transaction } from "firebase/firestore";
 import {
   COINS, DEFAULT_MARKET, HOUR_MS, KST_OFFSET_MS, entryPaused, weekIndexAt, weeklyLevy, hourIndexAt, leverageChoices, normalizeMarket, periodWords, quoteBuy, quoteClose, quoteOpen, quoteSell,
-  type DividendClaim, type RegimeKind, type BuyQuote, type CloseKind, type SellQuote, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
+  type DividendClaim, type InfoKind, type RegimeKind, type BuyQuote, type CloseKind, type SellQuote, type CloseQuote, type CoinId, type HourDoc, type MarketConfig, type NewsSize, type OpenQuote, type Side, type TickDoc,
 } from "@fortuna/core";
 import { FortunaError, writeEntry, type PlayerSession, type Session } from "./ledger-write.ts";
 import { readEconomy, readWallet } from "./player-ops.ts";
@@ -325,5 +325,26 @@ export async function claimDividend(session: PlayerSession, claimId: string): Pr
     const ledgerId = writeEntry(tx, session, session.pid, wallet, { type: "dividend", actor: "player", delta: amount, vaultDelta: -amount, detail: { claimId, amount } });
     tx.update(ref, { claimed: claim.total, lastLedger: ledgerId });
     return { ledgerId, amount };
+  });
+}
+
+// ── 거래소 2부 7단계: 정보 구매 ──
+
+/** Pay for a hint; the recorder answers it in about a minute (infoRequests/{ledgerId}). */
+export async function buyInfo(session: PlayerSession, kind: InfoKind, coin: CoinId): Promise<string> {
+  const { db } = session;
+  return runTransaction(db, async (tx) => {
+    const wallet = await readWallet(tx, session), economy = await readEconomy(tx, db), market = await readMarket(tx, db);
+    if (!market.info.enabled) throw new FortunaError("info-closed", "지금은 정보를 팔지 않습니다.");
+    const price = kind === "rumor" ? market.info.rumorPrice : market.info.peekPrice;
+    if (wallet.balance < price) throw new FortunaError("balance", "잔액이 부족합니다.");
+    const before = wallet.info ?? { period: -1, used: 0 }, period = session.clock.period(economy.limitPeriod);
+    const used = (before.period === period ? before.used : 0) + 1;
+    if (used > market.info.dailyLimit) throw new FortunaError("info-limit", `${periodWords(economy.limitPeriod).now} 정보는 다 샀습니다.`);
+    const ledgerId = writeEntry(tx, session, session.pid, wallet, {
+      type: "marketInfo", actor: "player", delta: -price, vaultDelta: price, detail: { kind, coin, price }, wallet: { info: { period, used } },
+    });
+    tx.set(doc(db, "infoRequests", ledgerId), { playerId: session.pid, kind, coin, status: "pending", answer: null, createdAt: serverTimestamp(), answeredAt: null });
+    return ledgerId;
   });
 }
