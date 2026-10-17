@@ -59,7 +59,7 @@ export function ContestPanel({ contest, controls }: { contest: OpenContest; cont
             </li>
           ))}
         </ol>
-      ) : <p className="mt-1 text-xs text-mist">아직 아무도 나서지 않았다. ⚡ › 특기 쓰기로 겨루세요.</p>}
+      ) : <p className="mt-1 text-xs text-mist">아직 아무도 나서지 않았다. 특기를 결제할 때 「걸기」를 켜면 점수로 오른다.</p>}
       {controls}
     </section>
   );

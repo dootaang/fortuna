@@ -8,7 +8,7 @@ import { SectionTitle, useDealer } from "./DealerApp.tsx";
 import { relay } from "../relay.ts";
 
 const NOTIFY_LABELS: Record<NotifyEvent, string> = {
-  arrival: "새 승객 도착", bigGamble: "하우스의 큰 승패", skill: "특기 결제", shop: "상점 구매 (비밀 내용 제외)", fundFilled: "모금함 달성", liberation: "구역 해방", repaid: "빚 완제", houseOpen: "하우스 개방", pvp: "대결 판 열림·승리", market: "거래소 큰 손익·강제 청산·환전가 소식",
+  arrival: "새 승객 도착", bigGamble: "하우스의 큰 승패", skill: "특기 결제", shop: "상점 구매 (비밀 내용 제외)", fundFilled: "모금함 달성", liberation: "구역 해방", repaid: "빚 완제", houseOpen: "하우스 개방", pvp: "대결 판 열림·승리", market: "거래소 큰 손익·강제 청산·환전가 소식", story: "이야기 진행 (간부전·단서·장부)",
 };
 
 export function Settings() {

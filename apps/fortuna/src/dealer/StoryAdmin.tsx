@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { onSnapshot } from "firebase/firestore";
 import { DISTRICTS, FRONT_DISTRICTS, FRONT_MAX, FRONT_TEXT, HOTEL_RULES, type FrontDistrict, type PlaceId } from "@fortuna/core";
 import {
-  GLOBAL_CHANNEL, closeRound, districtCoin, sendMessage, giveClue, importLorePack, openFight, playAssist, raiseBoss, refreshBook, saveClue, scheduleNews, setBookRevealed, stepFront, storyRefs,
+  closeRound, districtCoin, giveClue, importLorePack, openFight, playAssist, raiseBoss, refreshBook, saveClue, scheduleNews, setBookRevealed, stepFront, storyEvent, storyRefs, winsNeeded,
   type ClueDoc, type ClueInput, type LoreImportResult, type SecretNews,
 } from "@fortuna/data";
 import { db } from "../firebase.ts";
@@ -11,6 +11,16 @@ import { roundEntries } from "../city/Stage.tsx";
 import { LedgerBook, useBook } from "../city/LedgerBook.tsx";
 import { Frame, Notice, NumberField, TextField, cx, useAction } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
+import { relay } from "../relay.ts";
+
+/** Post a story line to Discord (best effort: a failed post is listed on the notification page for resending). */
+export function useTell(): (text: string) => Promise<void> {
+  const { session, notify } = useDealer();
+  return async (text: string) => {
+    const id = await storyEvent(session, text).catch(() => null);
+    relay(notify.relayUrl, id);
+  };
+}
 
 /** 딜러 › 도시 › 이야기: 전선 시계, 이야기 자료, 단서, 장부. 설계는 비공개 문서(자료/fortuna-gm/SPEC-STORY.md). */
 export function StoryAdmin() {
@@ -35,7 +45,7 @@ function FrontDesk() {
     <Frame>
       <SectionTitle title="전선 시계" />
       <p className="mb-3 text-xs text-mist">
-        한 칸 올리면 그 칸의 소식이 환전가로 나갑니다: 골목 소문(바로) → 1분 뒤 공식 공지(그 구역 코인 악재, 1~3칸 7%, 4칸 15%) → 30분 뒤 포르투나 석간(출렁임만).
+        한 칸 올리면 그 칸의 소식이 환전가로 나갑니다: 골목 소문(바로) → 1분 뒤 공식 공지(그 구역 코인 악재, 1~3칸 7%, 4칸 15%) → 30분 뒤 포르투나 석간(출렁임만). 공식 공지와 석간은 디스코드에도 올라갑니다.
         내리면 소식은 없습니다. 해방된 구역은 올릴 수 없습니다. 4칸(파국)인 동안 그 구역 장부에 검은 쪽이 붙습니다.
       </p>
       <ul className="grid gap-2 md:grid-cols-2">
@@ -127,7 +137,7 @@ function ClueManager() {
   return (
     <Frame>
       <SectionTitle title="단서" />
-      <p className="mb-2 text-xs text-mist">건네기는 장면 콘솔의 「🔎 단서 주기」에서 합니다. ◆는 담보 단서(찾으면 그 구역 장부 3쪽이 백지가 됩니다).</p>
+      <p className="mb-2 text-xs text-mist">건네기는 위의 「🔎 단서 주기」에서 합니다. ◆는 담보 단서(찾으면 그 구역 장부 3쪽이 백지가 됩니다).</p>
       {clues.length === 0 ? <Notice>단서가 없습니다. 이야기 자료를 가져오거나 새로 만드십시오.</Notice> : (
         <ul className="divide-y divide-gold-400/15 text-sm">
           {clues.map((clue) => (
@@ -157,7 +167,7 @@ function ClueManager() {
               </select>
             </label>
           </div>
-          <TextField label="앞면 (장면 채팅에도 보임)" value={form.public} onChange={(value) => setForm({ ...form, public: value })} multiline maxLength={1_000} />
+          <TextField label="앞면 (받은 사람 수첩에, 웹앱 장면 채팅에도)" value={form.public} onChange={(value) => setForm({ ...form, public: value })} multiline maxLength={1_000} />
           <TextField label="뒷면 (가진 사람만)" value={form.secret} onChange={(value) => setForm({ ...form, secret: value })} multiline maxLength={2_000} />
           <TextField label="얻는 장면 메모 (딜러만)" value={form.how} onChange={(value) => setForm({ ...form, how: value })} multiline maxLength={500} />
           <div className="flex gap-2">
@@ -170,17 +180,17 @@ function ClueManager() {
   );
 }
 
-/** 장면 콘솔: 이 장소에 있는 사람들에게 단서를 건넨다. */
+/** 단서를 건넨다: 받은 사람의 수첩에 들어가고, 디스코드에 한 줄 알린다. 장면 콘솔에서는 그 장소에 있는 사람이 먼저 골라져 있다. */
 export function GiveClueDesk({ place, here, sessionId }: { place: PlaceId; here: { id: string; name: string }[]; sessionId: string | null }) {
-  const { session } = useDealer();
+  const { session, players } = useDealer();
   const clues = useClues();
+  const tell = useTell();
   const { busy, run } = useAction();
   const [clueId, setClueId] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const hereKey = here.map((row) => row.id).join(",");
   useEffect(() => { setPicked(new Set(here.map((row) => row.id))); }, [place, hereKey]);
-  const { actors } = useLookups();
-  const everyone = [...actors.values()].map((row) => ({ id: row.id, name: row.data.name }));
+  const everyone = players.map((row) => ({ id: row.id, name: row.data.name }));
   return (
     <Frame>
       <SectionTitle title="🔎 단서 주기" />
@@ -198,16 +208,18 @@ export function GiveClueDesk({ place, here, sessionId }: { place: PlaceId; here:
                   if (event.target.checked) next.add(row.id); else next.delete(row.id);
                   setPicked(next);
                 }} />
-                {row.name}{here.some((entry) => entry.id === row.id) ? "" : <span className="text-[0.65rem] text-mist">(다른 곳)</span>}
+                {row.name}
               </label>
             ))}
           </div>
           <button type="button" className="btn btn-gold btn-sm" disabled={busy || !clueId || picked.size === 0}
             onClick={() => void run(async () => {
               const ids = [...picked], names = ids.map((id) => everyone.find((row) => row.id === id)?.name ?? id);
+              const title = clues.find((clue) => clue.id === clueId)?.title ?? "";
               await giveClue(session, clueId, ids, place, names, sessionId);
+              await tell(`📒 **${names.join(", ")}**의 수첩에 단서 「${title}」이(가) 적혔습니다. (웹앱 › 도시 › 📒 수첩)`);
               setClueId("");
-            }, "단서를 건넸습니다.")}>건네기 (채팅에 앞면이 올라갑니다)</button>
+            }, "단서를 건넸습니다.")}>건네기 (디스코드에 알림)</button>
         </div>
       )}
     </Frame>
@@ -273,9 +285,9 @@ function BookDesk() {
   );
 }
 
-/** 장부를 공개할 때 쓰는 묘사 (이야기 자료에서): 복사하거나 전체 채팅에 서술로 올린다. */
+/** 장부를 공개할 때 쓰는 묘사 (이야기 자료에서): 복사하거나 디스코드에 올린다. */
 function RevealScenes() {
-  const { session } = useDealer();
+  const tell = useTell();
   const { busy, run } = useAction();
   const [items, setItems] = useState<string[]>([]);
   useEffect(() => onSnapshot(storyRefs.revealScenes(db), (snapshot) => setItems(snapshot.data()?.items ?? []), () => setItems([])), []);
@@ -289,7 +301,7 @@ function RevealScenes() {
             <p className="whitespace-pre-line text-ivory/90">{scene}</p>
             <div className="mt-1 flex gap-2">
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => void navigator.clipboard?.writeText(scene).catch(() => undefined)}>복사 (디스코드용)</button>
-              <button type="button" className="btn btn-dark btn-sm" disabled={busy} onClick={() => { if (window.confirm("전체 채팅에 서술로 올릴까요?")) void run(() => sendMessage(session, session.uid, { authorKind: "narration" }, GLOBAL_CHANNEL, scene), "올렸습니다."); }}>전체 채팅에 올리기</button>
+              <button type="button" className="btn btn-dark btn-sm" disabled={busy} onClick={() => { if (window.confirm("디스코드에 올릴까요?")) void run(() => tell(scene), "올렸습니다."); }}>디스코드에 올리기</button>
             </div>
           </li>
         ))}
@@ -303,6 +315,7 @@ function RevealScenes() {
 /** 장면 콘솔 › 맞붙기 아래: 간부전·최종전 열기. */
 export function FightOpener({ place }: { place: PlaceId }) {
   const { session, config } = useDealer();
+  const tell = useTell();
   const { busy, run } = useAction();
   const [mode, setMode] = useState<"boss" | "final">("boss");
   const [district, setDistrict] = useState<string>("medieval");
@@ -313,7 +326,7 @@ export function FightOpener({ place }: { place: PlaceId }) {
     <details className="mt-3 rounded-sm border border-[#c4473a]/40 p-2">
       <summary className="cursor-pointer text-sm text-[#f2b3aa]">간부전 · 최종전 열기 (라운드제)</summary>
       <p className="my-2 text-xs text-mist">
-        라운드마다 보스 점수를 걸고, 플레이어가 이 장소에서 특기를 씁니다(우리 편 = 이번 판 최고 점수 + 조력). 「웃돈 +1」은 보스 금고에서 특기 비용표만큼 빠집니다.
+        라운드마다 보스 점수를 걸고, 플레이어가 특기 탭에서 「걸기」를 켜고 결제합니다(우리 편 = 이번 판 최고 점수 + 조력). 진행은 디스코드에 그대로 올라갑니다. 「웃돈 +1」은 보스 금고에서 특기 비용표만큼 빠집니다.
         최종전은 웃돈마다 지배인이 장부를 한 쪽 넘기고, 백지 쪽이면 불발입니다. 조력 카드는 해방 + 담보 단서를 모두 갖춘 구역 것만 나옵니다.
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -333,7 +346,11 @@ export function FightOpener({ place }: { place: PlaceId }) {
       </div>
       <p className="mt-1 text-[0.7rem] text-mist">특기 비용표: {config.skill.costs.slice(1, 9).map((cost, index) => `${index + 1}점 ${cost.toLocaleString("ko-KR")}`).join(" · ")}</p>
       <button type="button" className="btn btn-danger btn-sm mt-2" disabled={busy}
-        onClick={() => void run(() => openFight(session, place, { title: "", bossName: boss || (mode === "final" ? "지배인" : ""), mode, district: mode === "boss" ? district : null, rounds, bossVault: vault }), "열었습니다.")}>
+        onClick={() => void run(async () => {
+          const bossName = boss.trim() || (mode === "final" ? "지배인" : "보스");
+          await openFight(session, place, { title: "", bossName, mode, district: mode === "boss" ? district : null, rounds, bossVault: vault });
+          await tell(`⚔️ **${mode === "final" ? "최종전" : "간부전"} — ${bossName}**\n${rounds}판 ${winsNeeded(rounds)}선승. 웹앱 특기 탭에서 「걸기」를 켜고 결제하면 이번 판 우리 편 점수가 됩니다.`);
+        }, "열었습니다.")}>
         {mode === "final" ? "최종전 열기" : "간부전 열기"}
       </button>
     </details>
@@ -343,6 +360,7 @@ export function FightOpener({ place }: { place: PlaceId }) {
 /** 진행 중인 간부전의 딜러 단추: 웃돈, 라운드 닫기, 조력 카드. */
 export function FightControls({ contest, sessionId }: { contest: OpenContest; sessionId: string | null }) {
   const { session, config } = useDealer();
+  const tell = useTell();
   const { busy, run } = useAction();
   const entries = roundEntries(contest, useContestEntries(contest.id));
   const best = entries[0]?.data.skill?.used ?? 0;
@@ -350,12 +368,13 @@ export function FightControls({ contest, sessionId }: { contest: OpenContest; se
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => void run(() => raiseBoss(session, contest.id, config.skill.costs, sessionId))}>
+        <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => void run(async () => tell(await raiseBoss(session, contest.id, config.skill.costs, sessionId)))}>
           웃돈 +1 ({next}점{contest.mode === "final" ? " · 장부 한 쪽" : ` · ${cost.toLocaleString("ko-KR")}코인`})
         </button>
         <button type="button" className="btn btn-gold btn-sm" disabled={busy}
           onClick={() => { if (window.confirm(`제${contest.round ?? 1}판을 닫을까요? 우리 편 ${best + (contest.bonus ?? 0)} : ${contest.bossName} ${contest.bossScore}`)) void run(async () => {
             const result = await closeRound(session, contest.id, best, sessionId);
+            await tell(result.decided ? `${result.line}\n🏁 **${result.decided === "party" ? "우리 편" : contest.bossName}이(가) 이겼다.**` : result.line);
             if (result.decided) window.alert(result.decided === "party" ? "우리 편이 이겼습니다. 아래 결과를 발표하고, 간부전이면 구역 탭에서 해방을 켜십시오." : `${contest.bossName}이(가) 이겼습니다. 결과를 발표하고 닫으십시오.`);
           }); }}>
           제{contest.round ?? 1}판 닫기
@@ -365,7 +384,7 @@ export function FightControls({ contest, sessionId }: { contest: OpenContest; se
         <div className="flex flex-wrap gap-1.5">
           {(contest.assists ?? []).map((card) => (
             <button key={card.id} type="button" className={cx("btn btn-sm", card.used ? "btn-ghost" : "btn-dark")} disabled={busy || card.used} title={card.line}
-              onClick={() => { if (window.confirm(`조력 카드 「${card.title}」를 펼칠까요?`)) void run(() => playAssist(session, contest.id, card.id, sessionId)); }}>
+              onClick={() => { if (window.confirm(`조력 카드 「${card.title}」를 펼칠까요?`)) void run(async () => tell(await playAssist(session, contest.id, card.id, sessionId))); }}>
               ✦ {card.title} <span className="text-[0.65rem] text-mist">{card.effect.kind === "score" ? `+${card.effect.amount}점` : card.effect.kind === "fizzle" ? `불발 ${card.effect.amount}` : `백지 ${card.effect.amount}쪽`}</span>
             </button>
           ))}

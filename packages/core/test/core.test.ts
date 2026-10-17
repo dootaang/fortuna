@@ -187,5 +187,7 @@ describe("discord lines", () => {
     expect(formatNotification({ kind: "skill", playerName: "에이든", districtId: "", detail: { skillName: "쾌검", usedLevel: 6, cost: 4300, borrowed: 3700, note: "" }, payload: {} }, 1000)).toContain("3,700코인은 지배인에게");
     expect(formatNotification({ kind: "shop", playerName: "에이든", districtId: "", detail: { itemName: "간부의 약점", secret: "비밀" }, payload: {} }, 1000)).not.toContain("비밀");
     expect(formatNotification({ kind: "liberation", playerName: "", districtId: "", detail: {}, payload: { districtId: "horror" } }, 1000)).toContain("무월리");
+    expect(formatNotification({ kind: "story", playerName: "", districtId: "", detail: {}, payload: { text: "⚔ 제1판" } }, 1000)).toBe("⚔ 제1판");
+    expect(formatNotification({ kind: "story", playerName: "", districtId: "", detail: {}, payload: {} }, 1000)).toBeNull();
   });
 });

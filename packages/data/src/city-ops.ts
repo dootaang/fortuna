@@ -95,7 +95,13 @@ export interface ContestDoc {
   openedAt: Timestamp;
 }
 export interface ActivityDoc { lastAt: Timestamp; lastName: string; }
-export interface CityConfig { closedLines: LineId[]; /** The ledger is shown to players only after the dealer reveals it. */ bookRevealed?: boolean; }
+export interface CityConfig {
+  closedLines: LineId[];
+  /** The ledger is shown to players only after the dealer reveals it. */
+  bookRevealed?: boolean;
+  /** Scenes and chat in the city tab. Off (the default) while the RP runs on Discord: players see the line map, the board and their notebook. */
+  scenes?: boolean;
+}
 
 export const MESSAGE_MAX = 2_000;
 export const GLOBAL_CHANNEL = "global";
@@ -374,6 +380,10 @@ export async function ensurePresetNpcs(session: Session): Promise<number> {
 export async function setLineClosed(session: Session, line: LineId, closed: boolean, current: LineId[]): Promise<void> {
   const next = closed ? [...new Set([...current, line])] : current.filter((entry) => entry !== line);
   await setDoc(cityRefs.config(session.db), { closedLines: next }, { merge: true });
+}
+
+export async function setCityScenes(session: Session, scenes: boolean): Promise<void> {
+  await setDoc(cityRefs.config(session.db), { scenes }, { merge: true });
 }
 
 export async function openContest(session: Session, place: PlaceId, title: string, bossName: string): Promise<string> {

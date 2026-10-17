@@ -19,8 +19,56 @@ import {
 } from "./useCity.ts";
 import "./city.css";
 
-/** 도시 2판: 노선도에서 역을 고르고, 장면 카드 아래에서 이야기한다. docs/SPEC-CITY-MAP.md */
+/**
+ * 도시 2판: 노선도에서 역을 고르고, 장면 카드 아래에서 이야기한다. docs/SPEC-CITY-MAP.md
+ * RP를 디스코드에서 하는 동안(딜러 설정 「웹앱 장면·채팅」이 꺼짐)은 노선도·역 게시판·수첩만 보인다.
+ */
 export default function CityPage() {
+  const now = useTicker(60_000);
+  const data = useCityData(now);
+  if (data.scenes === null) return <Splash line="노선도를 펼치는 중…" />;
+  if (!data.scenes) return <CityLookupProvider value={{ actors: new Map(), data }}><HubView /></CityLookupProvider>;
+  return <SceneCity />;
+}
+
+/** 장면을 끈 도시: 노선도(전선 시계), 역 게시판, 단서 수첩. 캐릭터를 만들거나 이동할 필요가 없다. */
+function HubView() {
+  const { data } = useLookups();
+  const [selected, setSelected] = useState<PlaceId | null>(null);
+  const [board, setBoard] = useState(false);
+  const [notebook, setNotebook] = useState(false);
+  const info = useMemo(() => new Map((Object.keys(STATIONS) as PlaceId[]).map((id) => [id, { people: 0, unread: false, visited: false } satisfies StopInfo])), []);
+  const pick = selected ? STATIONS[selected] : null;
+  return (
+    <div className="city-shell">
+      <div className="relative min-h-0 flex-1">
+        <LineMap here={null} info={info} closed={data.closedLines} fronts={data.fronts} onPick={(id) => { cue("tap"); setSelected(id); }} selected={selected} />
+        <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-2">
+          <button type="button" className="city-btn pointer-events-auto" onClick={() => setNotebook(true)} aria-label="단서 수첩">📒 수첩</button>
+          <button type="button" className="city-btn pointer-events-auto" onClick={() => setBoard(true)}>📋 역 게시판</button>
+        </div>
+      </div>
+      <BoardModal open={board} onClose={() => setBoard(false)} extraTabs={data.bookRevealed ? [["가죽 장부", <BookTab key="book" />]] : []} />
+      <NotebookModal open={notebook} onClose={() => setNotebook(false)} />
+      {pick && (
+        <div className="shrink-0 border-t border-gold-400/40 bg-felt-950 p-3 md:absolute md:bottom-4 md:right-4 md:w-96 md:rounded-sm md:border">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="deco-caps text-[0.6rem]" style={{ color: LINES[pick.line].light }}>{LINES[pick.line].name}</p>
+              <p className="deco-title text-xl">{pick.name}</p>
+            </div>
+            <button type="button" className="text-mist" aria-label="닫기" onClick={() => setSelected(null)}>✕</button>
+          </div>
+          <p className="mt-1 text-sm italic text-ivory/80">{pick.sense}</p>
+          {data.closedLines.has(pick.line) && <p className="mt-1 text-xs text-[#f2b3aa]">운휴 중인 노선</p>}
+          <p className="mt-2 text-xs text-mist">장면은 디스코드에서 진행됩니다.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SceneCity() {
   const { session } = usePlayer();
   const { ready, actors } = useActors();
   const me = actors.find((row) => row.id === session.pid) ?? null;

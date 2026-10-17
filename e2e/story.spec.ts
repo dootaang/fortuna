@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { FRONT_TEXT } from "@fortuna/core";
-import { giveClue, importLorePack, openFight, raiseBoss, saveCharacter, setBookRevealed, stepFront } from "@fortuna/data";
+import { giveClue, importLorePack, openFight, raiseBoss, setBookRevealed, stepFront } from "@fortuna/data";
 import { DEFAULT_ECONOMY } from "@fortuna/core";
 import { playSomeGames, resetEmulators, seedCity, withDealer, withPlayer, type SeededCity } from "./seed.ts";
 
@@ -15,7 +15,7 @@ test.beforeAll(async () => {
   await resetEmulators();
   city = await seedCity();
   await playSomeGames(city.code, 0);
-  await withPlayer(city.code, (session) => saveCharacter(session, "에이든", { skin: 0, hair: 1, hairColor: 1, outfit: 1, outfitColor: 1, accessory: 0 }, null));
+
   await withDealer("dealer@example.com", async (session) => {
     await importLorePack(session, PACK);
     await stepFront(session, "medieval", 1);
@@ -27,20 +27,26 @@ test.beforeAll(async () => {
   });
 });
 
-test("story: boss fight panel, clue notebook, fronts board and the revealed ledger", async ({ page }) => {
+test("story (RP on Discord): stake a skill on the fight, clue notebook, fronts board and the revealed ledger", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await page.getByPlaceholder("FRT-XXXX-XXXX-XXXX").fill(city.code);
   await page.getByRole("button", { name: "개찰구 통과" }).click();
-  await page.getByRole("link", { name: /도시/ }).click();
 
-  // The fight at the plaza and the clue line in chat.
+  // The skills page shows the open fight; a payment staked on it becomes this round's party score.
+  await page.getByRole("link", { name: "특기", exact: true }).click();
   const fight = page.getByRole("region", { name: "간부전" });
   await expect(fight).toContainText("성문 앞 결투");
   await expect(fight).toContainText("제1판");
-  await expect(page.getByText("봉인된 양피지 사본").first()).toBeVisible();
+  await page.getByRole("radio", { name: /쾌검/ }).click();
+  await expect(page.getByRole("checkbox", { name: /「성문 앞 결투」에 걸기/ })).toBeChecked();
+  await page.getByRole("button", { name: /결제 · 300/ }).click();
+  await expect(fight).toContainText("에이든 · 쾌검", { timeout: 15_000 });
   await page.screenshot({ path: "test-results/shots/60-story-fight.png", animations: "disabled" });
+
+  // With scenes off, the city tab is the line map, the board and the notebook (no character to make).
+  await page.getByRole("link", { name: /도시/ }).click();
 
   // The notebook: the back of the card is only for its holder.
   await page.getByRole("button", { name: "단서 수첩" }).click();
@@ -51,7 +57,6 @@ test("story: boss fight panel, clue notebook, fronts board and the revealed ledg
   await notebook.getByRole("button", { name: "닫기" }).first().click();
 
   // The board: Loenheim's clock at 2/4 with that step's notice; the ledger with the collateral page wiped.
-  await page.getByRole("button", { name: /노선도/ }).click();
   await page.getByRole("button", { name: "📋 역 게시판" }).click();
   const board = page.getByRole("dialog", { name: "역 게시판" });
   await expect(board).toContainText(FRONT_TEXT.medieval[1]!.official);

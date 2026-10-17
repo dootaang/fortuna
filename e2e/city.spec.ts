@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { LINES, LINE_IDS, STATIONS, stationsOf } from "@fortuna/core";
 import { getDoc } from "firebase/firestore";
 import {
-  adjustWallet, cityRefs, ensurePresetNpcs, moveTo, openSession, placeChannel, saveCharacter, sendMessage, setPersistentEffect, setStageNpcs, whisperChannel,
+  adjustWallet, cityRefs, ensurePresetNpcs, moveTo, openSession, placeChannel, saveCharacter, sendMessage, setCityScenes, setPersistentEffect, setStageNpcs, whisperChannel,
 } from "@fortuna/data";
 import { allowDealer, makePng, playSomeGames, resetEmulators, seedCity, seedPlayers, signInWithGooglePopup, withDealer, withPlayer, type SeededCity } from "./seed.ts";
 
@@ -22,6 +22,7 @@ test.beforeAll(async () => {
     return session.pid;
   });
   await withDealer("dealer@example.com", async (session) => {
+    await setCityScenes(session, true);
     await adjustWallet(session, city.pid, { delta: 5_000, debtDelta: 0, memo: "도시 시험 지원금" });
     await ensurePresetNpcs(session);
     await openSession(session, "1화 — 휠 광장의 밤");
@@ -160,6 +161,7 @@ test("dealer city console: upload a background, put it live, speak as an NPC", a
     await expect(shell).toBeVisible();
   }
   await page.getByRole("button", { name: "도시", exact: true }).click();
+  await page.getByRole("button", { name: "장면 콘솔", exact: true }).click();
   await expect(page.getByRole("figure", { name: "휠 광장 장면" })).toBeVisible();
 
   // Upload a background for the plaza and put it on stage.

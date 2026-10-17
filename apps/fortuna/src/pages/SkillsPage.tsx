@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { limit, orderBy, query, where, type Timestamp } from "firebase/firestore";
 import { TEXT, borrowDebt, fill, skillCost, type LedgerEntry } from "@fortuna/core";
-import { paySkill, refs } from "@fortuna/data";
+import { paySkill, paySkillInChat, refs } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { useLiveQuery } from "../session/live.ts";
 import { Coins, Empty, Frame, PageTitle, TextField, cx, formatDate, useAction } from "../ui/kit.tsx";
@@ -9,6 +9,8 @@ import { Counter } from "../fx/Counter.tsx";
 import { flash } from "../fx/effects.ts";
 import { cue } from "../fx/cues.ts";
 import { relay } from "../relay.ts";
+import { ContestPanel } from "../city/Stage.tsx";
+import { useOpenContests } from "../city/useCity.ts";
 
 export default function SkillsPage() {
   const { player, config, wallet, session, notify } = usePlayer();
@@ -24,10 +26,17 @@ export default function SkillsPage() {
   const cost = skill ? skillCost(skill.level, used, config.skill.cumulative) : 0;
   const shortfall = Math.max(0, cost - wallet.balance);
   const canBorrow = config.borrow.enabled && shortfall > 0;
+  // 디스코드에서 RP를 하므로, 간부전·맞붙기 점수는 여기서 결제할 때 건다.
+  const contest = useOpenContests()[0] ?? null;
+  const [stake, setStake] = useState(true);
+  const staking = contest !== null && stake;
 
   async function pay() {
     if (!skill) return;
-    const id = await run(() => paySkill(session, { skillId, usedLevel: used, note, borrow: shortfall > 0 }));
+    const payment = { skillId, usedLevel: used, note, borrow: shortfall > 0 };
+    const id = await run(async () => (staking
+      ? (await paySkillInChat(session, player.name, contest.place, payment, { contestId: contest.id })).replace(/^skill_/, "")
+      : paySkill(session, payment)));
     if (!id) return;
     setStamp({ key: Date.now(), cost, name: `${skill.name} ${used}점` });
     flash("gold", 360); cue("perfect");
@@ -39,6 +48,7 @@ export default function SkillsPage() {
   return (
     <div className="space-y-4">
       <PageTitle eyebrow="SKILLS" title={TEXT.skill.title} />
+      {contest && <Frame className="!p-0 overflow-hidden"><ContestPanel contest={contest} /></Frame>}
       {!skills.length ? <Frame><Empty>{TEXT.skill.noSkills}</Empty></Frame> : (
         <>
           <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="특기">
@@ -75,6 +85,12 @@ export default function SkillsPage() {
                 <span className="deco-title text-3xl"><span className="coin"><Counter value={cost} duration={350} /></span></span>
               </div>
               <div className="mt-3"><TextField label="장면 메모 (선택)" value={note} onChange={setNote} maxLength={200} placeholder="예: 간부의 검을 받아낸다" /></div>
+              {contest && (
+                <label className={cx("mt-3 flex items-center gap-2 rounded-sm border px-3 py-2 text-sm", stake ? "border-gold-300 bg-gold-400/10 text-gold-200" : "border-gold-400/25 text-mist")}>
+                  <input type="checkbox" checked={stake} onChange={(event) => setStake(event.target.checked)} />
+                  「{contest.title}」에 걸기 — 이 결제를 {contest.mode === "boss" || contest.mode === "final" ? "이번 판 우리 편" : "맞붙기"} 점수로 올립니다
+                </label>
+              )}
               {shortfall > 0 && (
                 <p className="mt-3 text-sm text-[#f2b3aa]">
                   {canBorrow ? fill(TEXT.skill.borrowOffer, { amount: shortfall, debt: borrowDebt(shortfall, config.borrow.feeBps) }) : "잔액이 부족합니다."}

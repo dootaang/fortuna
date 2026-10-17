@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getAuth } from "firebase/auth";
-import { getDoc } from "firebase/firestore";
+import { addDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { normalizeNotify } from "@fortuna/core";
-import { arrive, buyItem, refs, saveItem, saveNotify, setDistrict, type Session } from "@fortuna/data";
+import { arrive, buyItem, refs, saveItem, saveNotify, setDistrict, storyEvent, type Session } from "@fortuna/data";
 import { relay, type Env } from "../../../apps/notifier/src/index.ts";
 import { anonymousSession, cityWithPlayer, closeAll, resetData } from "./harness.ts";
 
@@ -61,5 +61,17 @@ describe("discord relay worker", () => {
     const hook = discord();
     expect(await relay(eventId!, await token(admin), env, hook.post)).toEqual({ status: "sent" });
     expect(hook.posts[0]).toContain("무월리");
+  });
+
+  it("posts the dealer's story lines (fights, clues) as written; players cannot forge one", async () => {
+    const { admin, player } = await cityWithPlayer();
+    const eventId = await storyEvent(admin, "💰 마왕이 웃돈을 얹었다 — 5점.");
+    const hook = discord();
+    expect(await relay(eventId, await token(admin), env, hook.post)).toEqual({ status: "sent" });
+    expect(hook.posts[0]).toBe("💰 마왕이 웃돈을 얹었다 — 5점.");
+    await expect(addDoc(refs.events(player.db), { kind: "story", ledgerId: null, playerId: null, actorUid: getAuth(player.db.app).currentUser!.uid, at: serverTimestamp() as never, sentAt: null, payload: { text: "가짜" } })).rejects.toMatchObject({ code: "permission-denied" });
+    const notify = normalizeNotify((await getDoc(refs.notify(admin.db))).data());
+    await saveNotify(admin, { ...notify, enabled: { ...notify.enabled, story: false } });
+    expect(await relay(await storyEvent(admin, "꺼짐"), await token(admin), env, hook.post)).toEqual({ status: "disabled" });
   });
 });

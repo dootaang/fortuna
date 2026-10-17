@@ -5,7 +5,7 @@ import {
   type ImageFilter, type LineId, type PlaceId, type SceneEffect,
 } from "@fortuna/core";
 import {
-  cityRefs, closeSession, ensurePresetNpcs, fireEffect, openContest, openSession, placeChannel, saveNpc, sendMessage, setLineClosed, setPersistentEffect,
+  cityRefs, closeSession, ensurePresetNpcs, fireEffect, openContest, openSession, placeChannel, saveNpc, sendMessage, setCityScenes, setLineClosed, setPersistentEffect,
   setSceneImage, setSceneSense, setStageNpcs, updateContest, updateSceneImage, uploadSceneImage,
   type ImageOwner, type SceneImageDoc, type Speaker,
 } from "@fortuna/data";
@@ -14,19 +14,19 @@ import { ChatPanel, PAGE, type ChatIdentity } from "../city/Chat.tsx";
 import { MAX_SIDE, imageStyle, shrinkImage } from "../city/images.ts";
 import { SceneCard, NpcFace } from "../city/SceneCard.tsx";
 import { ContestPanel, Presence, Records } from "../city/Stage.tsx";
-import { CityLookupProvider, useActors, useCityData, useLookups, useMessages, useOpenContest, useScene, useTicker } from "../city/useCity.ts";
+import { CityLookupProvider, useActors, useCityData, useLookups, useMessages, useOpenContest, useOpenContests, useScene, useTicker } from "../city/useCity.ts";
 import { Empty, Frame, Notice, NumberField, TextField, cx, useAction, useToast } from "../ui/kit.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
-import { FightControls, FightOpener, GiveClueDesk, StoryAdmin } from "./StoryAdmin.tsx";
+import { FightControls, FightOpener, GiveClueDesk, StoryAdmin, useTell } from "./StoryAdmin.tsx";
 import "../city/city.css";
 
 /**
- * 딜러 › 도시: 장면 콘솔(이미지·효과·NPC·말하기), NPC, 컷 보관함, 세션·노선.
- * docs/SPEC-CITY-MAP.md 6~10절.
+ * 딜러 › 도시: 이야기(간부전·단서·시계·장부), 장면 콘솔(웹앱 장면용), NPC, 컷 보관함, 세션·노선.
+ * RP는 디스코드에서 하므로 이야기 탭이 먼저다. docs/SPEC-CITY-MAP.md 6~10절.
  */
 const SUBTABS = [
-  { id: "scene", label: "장면 콘솔" },
   { id: "story", label: "이야기" },
+  { id: "scene", label: "장면 콘솔" },
   { id: "npcs", label: "NPC" },
   { id: "cuts", label: "장면 컷" },
   { id: "ops", label: "세션·노선" },
@@ -39,7 +39,7 @@ export function CityAdmin() {
   const now = useTicker(15_000);
   const data = useCityData(now);
   const byId = useMemo(() => new Map(actors.map((row) => [row.id, row])), [actors]);
-  const [tab, setTab] = useState<SubTab>("scene");
+  const [tab, setTab] = useState<SubTab>("story");
   return (
     <CityLookupProvider value={{ actors: byId, data }}>
       <div className="mb-4 flex flex-wrap gap-1">
@@ -48,13 +48,30 @@ export function CityAdmin() {
         ))}
       </div>
       {tab === "scene" && <SceneConsole nowMs={now} />}
-      {tab === "story" && <StoryAdmin />}
+      {tab === "story" && (
+        <div className="space-y-4">
+          <FightDesk sessionId={data.session?.id ?? null} />
+          <GiveClueDesk place="wheel-plaza" here={[]} sessionId={data.session?.id ?? null} />
+          <StoryAdmin />
+        </div>
+      )}
       {tab === "npcs" && <NpcManager />}
       {tab === "cuts" && <ImageShelf owner="cut" refId="" title="장면 컷" hint="채팅에 끼워 보내는 그림입니다. 장면 콘솔 채팅의 ⚡ 메뉴에서 보냅니다." />}
       {tab === "ops" && <Operations />}
       {tab === "records" && <Records identity={null} names={new Map(actors.map((row) => [row.id, row.data.name]))} />}
     </CityLookupProvider>
   );
+}
+
+// ── 간부전·맞붙기 (장소와 상관없이) ──
+
+/** Every open contest with its controls; with none open, the forms to open one. Players stake their skill payments from the skills page. */
+function FightDesk({ sessionId }: { sessionId: string | null }) {
+  const toast = useToast();
+  const open = useOpenContests();
+  const onError = (message: string) => toast("error", message);
+  if (!open.length) return <ContestDesk place="wheel-plaza" contest={null} speaker={{ authorKind: "gm" }} sessionId={sessionId} onError={onError} />;
+  return <>{open.map((contest) => <ContestDesk key={contest.id} place={contest.place} contest={contest} speaker={{ authorKind: "gm" }} sessionId={sessionId} onError={onError} />)}</>;
 }
 
 // ── 장면 콘솔 ──
@@ -178,6 +195,7 @@ function ContestDesk({ place, contest, speaker, sessionId, onError }: {
   place: PlaceId; contest: ReturnType<typeof useOpenContest>; speaker: Speaker; sessionId: string | null; onError: (message: string) => void;
 }) {
   const { session } = useDealer();
+  const tell = useTell();
   const { busy, run } = useAction();
   const [title, setTitle] = useState("");
   const [boss, setBoss] = useState("");
@@ -189,12 +207,16 @@ function ContestDesk({ place, contest, speaker, sessionId, onError }: {
     return (
       <Frame>
         <SectionTitle title="맞붙기" />
-        <p className="mb-2 text-xs text-mist">열어 두면 이 장소에서 쓰는 특기 결제가 점수판에 오릅니다. 상대(보스)의 점수는 딜러가 정합니다.</p>
+        <p className="mb-2 text-xs text-mist">열어 두면 플레이어가 특기 탭에서 「걸기」를 켜고 결제한 특기가 점수판에 오릅니다. 상대(보스)의 점수는 딜러가 정합니다. 여는 것과 결과는 디스코드에 올라갑니다.</p>
         <div className="grid gap-2 sm:grid-cols-2">
           <TextField label="제목" value={title} onChange={setTitle} placeholder="흑전각 앞 결투" maxLength={80} />
           <TextField label="상대 (비우면 플레이어끼리)" value={boss} onChange={setBoss} placeholder="천마" maxLength={40} />
         </div>
-        <button type="button" className="btn btn-gold btn-sm mt-2" disabled={busy} onClick={() => void run(async () => { await openContest(session, place, title, boss); setTitle(""); setBoss(""); })}>맞붙기 열기</button>
+        <button type="button" className="btn btn-gold btn-sm mt-2" disabled={busy} onClick={() => void run(async () => {
+          await openContest(session, place, title, boss);
+          await tell(`⚔️ **맞붙기 — ${title.trim() || "맞붙기"}**${boss.trim() ? ` · 상대: ${boss.trim()}` : ""}\n웹앱 특기 탭에서 「걸기」를 켜고 결제하면 점수로 오릅니다.`);
+          setTitle(""); setBoss("");
+        })}>맞붙기 열기</button>
         <FightOpener place={place} />
       </Frame>
     );
@@ -207,16 +229,20 @@ function ContestDesk({ place, contest, speaker, sessionId, onError }: {
           {contest.bossName && (
             <div className="flex items-end gap-2">
               <div className="w-32"><NumberField label={`${contest.bossName} 점수`} value={bossScore} onChange={setBossScore} min={0} max={99} /></div>
-              <button type="button" className="btn btn-dark btn-sm mb-0.5" disabled={busy || !Number.isFinite(bossScore)} onClick={() => void run(() => updateContest(session, contest.id, { bossScore }))}>점수 걸기</button>
+              <button type="button" className="btn btn-dark btn-sm mb-0.5" disabled={busy || !Number.isFinite(bossScore)} onClick={() => void run(async () => {
+                await updateContest(session, contest.id, { bossScore });
+                await tell(`🎯 ${contest.mode === "boss" || contest.mode === "final" ? `제${contest.round ?? 1}판 — ` : ""}${contest.bossName}의 점수: **${bossScore}점**`);
+              })}>점수 걸기</button>
             </div>
           )}
-          <TextField label="결과 (채팅에 판정으로 올라갑니다)" value={result} onChange={setResult} placeholder="벨라의 검이 먼저 닿았다." multiline maxLength={1_000} />
+          <TextField label="결과 (디스코드에 판정으로 올라갑니다)" value={result} onChange={setResult} placeholder="벨라의 검이 먼저 닿았다." multiline maxLength={1_000} />
           <div className="flex gap-2">
             <button type="button" className="btn btn-gold btn-sm" disabled={busy || !result.trim()} onClick={() => void run(async () => {
               const who: Speaker = speaker.authorKind === "pc" ? { authorKind: "gm" } : speaker;
               await sendMessage(session, session.uid, who, placeChannel(place), `**${contest.title}** — ${result.trim()}`, { kind: "result", sessionId, place, contestId: contest.id })
                 .catch((error: unknown) => { onError(error instanceof Error ? error.message : "결과를 올리지 못했습니다."); throw error; });
               await updateContest(session, contest.id, { status: "closed", result: result.trim() });
+              await tell(`🏁 **${contest.title}** — ${result.trim()}`);
               setResult("");
             })}>결과 발표하고 닫기</button>
             <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { if (window.confirm("결과 없이 맞붙기를 닫을까요?")) void run(() => updateContest(session, contest.id, { status: "closed" })); }}>그냥 닫기</button>
@@ -404,6 +430,15 @@ function Operations() {
   const [title, setTitle] = useState("");
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <Frame className="lg:col-span-2">
+        <SectionTitle title="웹앱 장면·채팅" />
+        <p className="mb-2 text-xs text-mist">
+          RP를 디스코드에서 하는 동안은 꺼 둡니다. 꺼져 있으면 플레이어의 도시 탭에는 노선도, 📋 역 게시판, 📒 수첩만 보입니다.
+          켜면 장면 카드, 채팅, 귓속말, 이동이 다시 열립니다(딜러의 장면 콘솔은 언제나 쓸 수 있습니다).
+        </p>
+        <button type="button" className={cx("btn btn-sm", data.scenes ? "btn-gold" : "btn-dark")} disabled={busy || data.scenes === null}
+          onClick={() => void run(() => setCityScenes(session, !data.scenes))}>{data.scenes ? "켜짐 — 끄기" : "꺼짐 — 켜기"}</button>
+      </Frame>
       <Frame>
         <SectionTitle title="세션" />
         {data.session ? (

@@ -166,8 +166,8 @@ describe("boss fights", () => {
     let fight = (await rootData(`contests/${id}`))!;
     expect(fight).toMatchObject({ bossScore: 4, bossVault: 100, bossSpent: 300 });
     await expect(raiseBoss(admin, id, DEFAULT_ECONOMY.skill.costs, null)).rejects.toMatchObject({ code: "vault" });
-    expect(await closeRound(admin, id, 5, null)).toEqual({ party: 1, boss: 0, decided: null });
-    expect(await closeRound(admin, id, 6, null)).toEqual({ party: 2, boss: 0, decided: "party" });
+    expect(await closeRound(admin, id, 5, null)).toMatchObject({ party: 1, boss: 0, decided: null, line: expect.stringContaining("우리 편 승리") });
+    expect(await closeRound(admin, id, 6, null)).toMatchObject({ party: 2, boss: 0, decided: "party" });
     fight = (await rootData(`contests/${id}`))!;
     expect(fight.round).toBe(3);
     expect(fight.log).toHaveLength(3);

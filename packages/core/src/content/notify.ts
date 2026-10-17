@@ -62,6 +62,8 @@ export function formatNotification(input: NotifyInput, bigGamble: number): strin
     case "repaid": return fill(NOTIFY_TEXT.repaid, { name });
     case "liberation": return fill(NOTIFY_TEXT.liberation, { district: districtContent(s(payload.districtId)).name });
     case "houseOpen": return NOTIFY_TEXT.houseOpen;
+    // 이야기 진행 (간부전·단서·장부): 딜러가 쓴 줄을 그대로 올린다.
+    case "story": return s(payload.text).slice(0, 1_900) || null;
     case "pvpOpen": return fill(NOTIFY_TEXT.pvpOpen, { name, venue: s(detail.venue) === "house" ? "하우스" : "뒷골목", stake: n(detail.stake) });
     case "pvpWin": return fill(NOTIFY_TEXT.pvpWin, { name, amount: n(input.delta) });
     case "marketWin":

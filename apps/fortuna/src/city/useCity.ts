@@ -92,6 +92,8 @@ export interface CityData {
   session: (SessionDoc & { id: string }) | null;
   /** Whether the dealer has revealed the ledger. */
   bookRevealed: boolean;
+  /** Scenes and chat in the city tab (off while the RP runs on Discord); null until the setting has loaded. */
+  scenes: boolean | null;
   /** Clock steps (0–4) of the seven districts. */
   fronts: Map<FrontDistrict, number>;
 }
@@ -104,10 +106,12 @@ export function useCityData(nowMs: number): CityData {
   const fronts = useSnapshotList(() => storyRefs.fronts(db), "fronts");
   const [closedLines, setClosedLines] = useState<Set<LineId>>(new Set());
   const [bookRevealed, setBookRevealed] = useState(false);
+  const [scenes, setScenes] = useState<boolean | null>(null);
   useEffect(() => onSnapshot(cityRefs.config(db), (snapshot) => {
     setClosedLines(new Set(snapshot.data()?.closedLines ?? []));
     setBookRevealed(snapshot.data()?.bookRevealed === true);
-  }, () => undefined), []);
+    setScenes(snapshot.data()?.scenes === true);
+  }, () => setScenes(false)), []);
   return useMemo(() => {
     const open = sessions.rows.map((row) => ({ ...row.data, id: row.id })).filter((session) => sessionOpen(session, nowMs))
       .sort((a, b) => ms(b.openedAt) - ms(a.openedAt))[0] ?? null;
@@ -116,16 +120,24 @@ export function useCityData(nowMs: number): CityData {
       npcs: new Map(npcs.rows.map((row) => [row.id, { ...row.data, id: row.id }])),
       closedLines,
       bookRevealed,
+      scenes,
       session: open,
       fronts: new Map(fronts.rows.filter((row) => (FRONT_DISTRICTS as readonly string[]).includes(row.id)).map((row) => [row.id as FrontDistrict, row.data.step])),
     };
-  }, [images.rows, npcs.rows, sessions.rows, fronts.rows, closedLines, bookRevealed, Math.floor(nowMs / 60_000)]);
+  }, [images.rows, npcs.rows, sessions.rows, fronts.rows, closedLines, bookRevealed, scenes, Math.floor(nowMs / 60_000)]);
 }
 
 export type OpenContest = ContestDoc & Partial<FightFields> & { id: string };
 export function useOpenContest(place: PlaceId): OpenContest | null {
   const { rows } = useSnapshotList(() => query(cityRefs.contests(db), where("place", "==", place), where("status", "==", "open")), `contest:${place}`);
   return rows[0] ? { ...(rows[0].data as ContestDoc & Partial<FightFields>), id: rows[0].id } : null;
+}
+
+/** Every open contest in the city (the skills page offers to stake a payment on one). */
+export function useOpenContests(): OpenContest[] {
+  const { rows } = useSnapshotList(() => query(cityRefs.contests(db), where("status", "==", "open")), "contests:open");
+  return useMemo(() => rows.map((row) => ({ ...(row.data as ContestDoc & Partial<FightFields>), id: row.id }))
+    .sort((a, b) => (b.openedAt?.toMillis?.() ?? 0) - (a.openedAt?.toMillis?.() ?? 0)), [rows]);
 }
 
 /** Skill payments made for a contest, highest score first. */

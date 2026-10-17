@@ -18,7 +18,7 @@ export interface Env extends Partial<RecorderEnv> {
 
 /** Event kinds and the notify toggle that governs each. */
 const TOGGLE: Record<string, NotifyEvent> = {
-  arrival: "arrival", bigGamble: "bigGamble", skill: "skill", shop: "shop", fundFilled: "fundFilled", repaid: "repaid", liberation: "liberation", houseOpen: "houseOpen", pvpOpen: "pvp", pvpWin: "pvp", marketWin: "market", marketLoss: "market",
+  arrival: "arrival", bigGamble: "bigGamble", skill: "skill", shop: "shop", fundFilled: "fundFilled", repaid: "repaid", liberation: "liberation", houseOpen: "houseOpen", pvpOpen: "pvp", pvpWin: "pvp", marketWin: "market", marketLoss: "market", story: "story",
 };
 
 function cors(origin: string | null, env: Env): Record<string, string> {

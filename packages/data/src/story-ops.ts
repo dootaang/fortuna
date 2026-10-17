@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch, type CollectionReference, type DocumentReference, type Firestore } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch, type CollectionReference, type DocumentReference, type Firestore } from "firebase/firestore";
 import { COIN_IDS, COINS, FRONT_DISTRICTS, FRONT_MAX, FRONT_TEXT, LINES, LINE_IDS, bookInputFrom, deriveBook, type BookDoc, type CoinId, type PageState, type FrontDistrict, type LineId, type PlaceId } from "@fortuna/core";
 import { FortunaError, type PlayerSession, type Session } from "./ledger-write.ts";
 import { cityRefs, placeChannel, sendMessage, type ContestDoc } from "./city-ops.ts";
@@ -69,6 +69,16 @@ export async function stepFront(session: Session, district: FrontDistrict, direc
   }
   await refreshBook(session).catch(() => undefined);
   return next;
+}
+
+// ── 디스코드 ──
+
+/** An event carrying one story line (fights, clues, the ledger) for the notifier to post to Discord. Returns its id to relay. */
+export async function storyEvent(session: Session, text: string): Promise<string> {
+  const body = text.trim().slice(0, 1_900);
+  if (!body) throw new FortunaError("text", "보낼 내용이 없습니다.");
+  const ref = await addDoc(refs.events(session.db), { kind: "story", ledgerId: null, playerId: null, actorUid: session.uid, at: now(), sentAt: null, payload: { text: body } });
+  return ref.id;
 }
 
 // ── 단서 ──
@@ -326,7 +336,7 @@ export async function raiseBoss(session: Session, id: string, costs: readonly nu
 }
 
 /** Close the round: the higher score wins it (a tie is a draw). The next round starts with the boss at 0 until the dealer sets it. */
-export async function closeRound(session: Session, id: string, partyScore: number, sessionId: string | null): Promise<{ party: number; boss: number; decided: "party" | "boss" | null }> {
+export async function closeRound(session: Session, id: string, partyScore: number, sessionId: string | null): Promise<{ party: number; boss: number; decided: "party" | "boss" | null; line: string }> {
   const fight = await fightOf(session, id);
   const party = partyScore + fight.bonus, verdict = party > fight.bossScore ? "party" : party < fight.bossScore ? "boss" : "draw";
   const wins = { party: fight.wins.party + (verdict === "party" ? 1 : 0), boss: fight.wins.boss + (verdict === "boss" ? 1 : 0) };
@@ -337,11 +347,11 @@ export async function closeRound(session: Session, id: string, partyScore: numbe
     wins, round: fight.round + 1, roundStartedAt: now(), bossScore: 0, bonus: 0, log: [...fight.log, line].slice(-30),
   });
   await say(session, fight, id, line, sessionId);
-  return { ...wins, decided };
+  return { ...wins, decided, line };
 }
 
 /** Play a help card (final): extra score this round, a fizzled raise, or blank pages ahead in the manager's ledger. */
-export async function playAssist(session: Session, id: string, assistId: string, sessionId: string | null): Promise<void> {
+export async function playAssist(session: Session, id: string, assistId: string, sessionId: string | null): Promise<string> {
   const fight = await fightOf(session, id);
   const card = fight.assists.find((entry) => entry.id === assistId);
   if (!card || card.used) throw new FortunaError("assist", "쓸 수 없는 조력 카드입니다.");
@@ -360,4 +370,5 @@ export async function playAssist(session: Session, id: string, assistId: string,
   const line = `✦ 조력 — ${card.title}: “${card.line}” (${effect})`;
   await updateDoc(cityRefs.contest(session.db, id), { ...patch, log: [...fight.log, line].slice(-30) });
   await say(session, fight, id, line, sessionId);
+  return line;
 }
