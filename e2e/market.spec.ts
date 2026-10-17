@@ -19,10 +19,8 @@ test("exchange: board, chart, leveraged long with the loan slip, close", async (
   await page.getByPlaceholder("FRT-XXXX-XXXX-XXXX").fill(city.code);
   await page.getByRole("button", { name: "개찰구 통과" }).click();
 
-  // Lobby card quotes FTN.
-  const card = page.getByRole("link", { name: /환전가 거래소/ });
-  await expect(card).toContainText(/FTN [\d,]+\.\d\d/, { timeout: 15_000 });
-  await card.click();
+  // The exchange has its own tab in the bottom menu.
+  await page.getByRole("link", { name: "거래소", exact: true }).click();
 
   // The departure board lists all nine coins and keeps ticking.
   await expect(page.getByRole("heading", { name: "환전가 거래소" })).toBeVisible();

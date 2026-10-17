@@ -83,17 +83,21 @@ test("arrival, work, gamble, shop and wallet on a phone", async ({ page }) => {
   await expect(page.getByText("검을 뽑기 전에 왼손으로 소매를 턴다.")).toBeVisible();
   await page.getByRole("button", { name: "닫기" }).click();
 
-  // Wallet: pay a boosted skill (4→5 = 300 + 1,000) by borrowing the shortfall if needed.
-  await page.getByRole("link", { name: "특기" }).click();
+  // The ✦ button at the top: pay a boosted skill (4→5 = 300 + 1,000) from any screen, borrowing the shortfall if needed.
+  await page.getByRole("button", { name: /특기 쓰기/ }).click();
+  const sheet = page.getByRole("dialog", { name: "특기" });
+  await sheet.getByRole("radio", { name: /쾌검/ }).click();
+  await sheet.getByRole("button", { name: "5점", exact: true }).click();
+  await expect(sheet.getByText("1,300").first()).toBeVisible();
+  await sheet.getByRole("button", { name: /결제 · 1,300/ }).click();
+  await expect(sheet.getByText("PAID")).toBeVisible({ timeout: 15_000 });
+  await page.screenshot({ path: "test-results/shots/09-skills.png", animations: "disabled" });
+  await sheet.getByRole("link", { name: /최근 사용 기록/ }).click();
   await expect(page).toHaveURL(/\/skills$/);
-  await page.getByRole("radio", { name: /쾌검/ }).click();
-  await page.getByRole("button", { name: "5점", exact: true }).click();
-  await expect(page.getByText("1,300").first()).toBeVisible();
-  await page.getByRole("button", { name: /결제 · 1,300/ }).click();
-  await expect(page.getByText("PAID")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator("li", { hasText: "쾌검" }).first()).toContainText("5점");
-  await page.screenshot({ path: "test-results/shots/09-skills.png", fullPage: true, animations: "disabled" });
+  // The old wallet address lands on home, which now holds the wallet.
   await page.goto("/wallet");
+  await expect(page).toHaveURL(/\/$/);
   await expect(page.getByText(/쾌검 4→5점/)).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "모금함" })).toBeVisible();
   await page.screenshot({ path: "test-results/shots/09-wallet.png", fullPage: true, animations: "disabled" });
@@ -129,7 +133,7 @@ test("with the shop switched off, skills take its place", async ({ browser }) =>
   await page.getByRole("button", { name: "봉투를 받는다" }).click();
   await page.getByRole("button", { name: "환영 봉투 열기" }).click();
   await page.getByRole("button", { name: "도시로 들어선다" }).click();
-  await expect(page.getByRole("link", { name: /특기/ }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /특기 쓰기/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /상점/ })).toHaveCount(0);
   await page.goto("/shop");
   await expect(page).toHaveURL(/\/$/);

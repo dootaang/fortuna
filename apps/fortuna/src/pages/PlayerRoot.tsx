@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, Link, useLocation } from "react-router";
 import { signOut } from "firebase/auth";
 import { TEXT } from "@fortuna/core";
@@ -12,6 +12,24 @@ import { useAutoClaim } from "../pvp/PvpLobby.tsx";
 import { useAutoSettle } from "../market/useMarket.ts";
 import { Gate, type GateState } from "./Gate.tsx";
 import { Arrival } from "./Arrival.tsx";
+import { useOpenContests } from "../city/useCity.ts";
+
+const SkillQuick = lazy(() => import("./SkillsPage.tsx").then((module) => ({ default: module.SkillQuick })));
+
+/** 위쪽 ✦: 어느 화면에서든 특기 결제 창을 연다. 간부전·맞붙기가 열려 있으면 ⚔로 빨갛게 빛난다. */
+function SkillButton() {
+  const [open, setOpen] = useState(false);
+  const fight = useOpenContests().length > 0;
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} aria-label={fight ? "특기 쓰기 (판이 열려 있음)" : "특기 쓰기"}
+        className={cx("grid h-9 w-9 place-items-center rounded-full border transition", fight ? "border-[#c4473a] bg-[#c4473a]/20 text-[#f2b3aa] pulse-gold" : "border-gold-400/40 text-gold-200 hover:bg-gold-400/10")}>
+        {fight ? "⚔" : "✦"}
+      </button>
+      {open && <Suspense fallback={null}><SkillQuick open onClose={() => setOpen(false)} /></Suspense>}
+    </>
+  );
+}
 
 export function PlayerRoot() {
   const authState = useAuthUser();
@@ -47,13 +65,13 @@ function DealerSignedIn({ email }: { email: string }) {
   );
 }
 
+// 특기는 메뉴 대신 위쪽 ✦ 단추로 어느 화면에서든 연다(디스코드 RP 중에 가장 자주 쓰므로).
 const NAV = [
-  { to: "/", label: "로비", icon: "◆", end: true },
+  { to: "/", label: "홈", icon: "◆", end: true, also: ["/shop"] },
   { to: "/city", label: "도시", icon: "▦" },
   { to: "/work", label: "일터", icon: "⚒" },
-  { to: "/alley", label: "도박장", icon: "♠", also: ["/house", "/market", "/table", "/pvp"] },
-  { to: "/skills", label: "특기", icon: "✦" },
-  { to: "/wallet", label: "지갑", icon: "◈" },
+  { to: "/alley", label: "도박장", icon: "♠", also: ["/house", "/table", "/pvp"] },
+  { to: "/market", label: "거래소", icon: "📈" },
 ];
 
 function PlayerShell() {
@@ -85,10 +103,11 @@ function PlayerShell() {
             <p className="deco-title truncate text-base leading-tight">{player.name}</p>
           </Link>
           <div className="flex shrink-0 items-center gap-2">
-          <Link to="/wallet" className="flex shrink-0 items-center gap-2" aria-label="지갑 보기">
+          <Link to="/" className="flex shrink-0 items-center gap-2" aria-label="지갑 보기">
             <span className="chip chip-gold"><span className="coin"><Counter value={wallet.balance} /></span></span>
             {wallet.debt > 0 && <span className="chip chip-ruby">빚 <Counter value={wallet.debt} /></span>}
           </Link>
+          <SkillButton />
           <FxSettingsButton />
           </div>
         </div>
@@ -97,7 +116,7 @@ function PlayerShell() {
         <Outlet />
       </main>
       <nav ref={nav} className="fixed inset-x-0 bottom-0 z-30 border-t border-gold-400/30 bg-felt-950/95 backdrop-blur" style={{ paddingBottom: "var(--safe-bottom)" }} aria-label="주요 메뉴">
-        <ul className="mx-auto grid max-w-xl grid-cols-6">
+        <ul className="mx-auto grid max-w-xl grid-cols-5">
           {NAV.map((item) => (
             <li key={item.to}>
               <NavLink

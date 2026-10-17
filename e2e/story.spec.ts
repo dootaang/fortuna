@@ -34,16 +34,18 @@ test("story (RP on Discord): stake a skill on the fight, clue notebook, fronts b
   await page.getByPlaceholder("FRT-XXXX-XXXX-XXXX").fill(city.code);
   await page.getByRole("button", { name: "개찰구 통과" }).click();
 
-  // The skills page shows the open fight; a payment staked on it becomes this round's party score.
-  await page.getByRole("link", { name: "특기", exact: true }).click();
-  const fight = page.getByRole("region", { name: "간부전" });
+  // The ✦ button glows ⚔ while a fight is open; its sheet shows the fight, and a payment staked on it becomes this round's party score.
+  await page.getByRole("button", { name: "특기 쓰기 (판이 열려 있음)" }).click();
+  const sheet = page.getByRole("dialog", { name: "특기" });
+  const fight = sheet.getByRole("region", { name: "간부전" });
   await expect(fight).toContainText("성문 앞 결투");
   await expect(fight).toContainText("제1판");
-  await page.getByRole("radio", { name: /쾌검/ }).click();
-  await expect(page.getByRole("checkbox", { name: /「성문 앞 결투」에 걸기/ })).toBeChecked();
-  await page.getByRole("button", { name: /결제 · 300/ }).click();
+  await sheet.getByRole("radio", { name: /쾌검/ }).click();
+  await expect(sheet.getByRole("checkbox", { name: /「성문 앞 결투」에 걸기/ })).toBeChecked();
+  await sheet.getByRole("button", { name: /결제 · 300/ }).click();
   await expect(fight).toContainText("에이든 · 쾌검", { timeout: 15_000 });
   await page.screenshot({ path: "test-results/shots/60-story-fight.png", animations: "disabled" });
+  await sheet.getByRole("button", { name: "닫기" }).first().click();
 
   // With scenes off, the city tab is the line map, the board and the notebook (no character to make).
   await page.getByRole("link", { name: /도시/ }).click();

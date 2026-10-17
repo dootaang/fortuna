@@ -6,7 +6,7 @@ import { Link } from "react-router";
  * HTML은 만들지 않고 React 요소로만 그리므로 글에 무엇을 써도 화면을 깨뜨릴 수 없다.
  */
 /** `[[일터]]`, `[[거래소:FTN]]`: links to the app's own screens. */
-const SHORTCUTS: Record<string, string> = { 일터: "/work", 도박장: "/alley", 하우스: "/house", 거래소: "/market", 특기: "/skills", 지갑: "/wallet", 상점: "/shop", 로비: "/" };
+const SHORTCUTS: Record<string, string> = { 일터: "/work", 도박장: "/alley", 하우스: "/house", 거래소: "/market", 특기: "/skills", 지갑: "/", 상점: "/shop", 로비: "/", 홈: "/" };
 function shortcut(token: string): { to: string; label: string } | null {
   const [name, coin] = token.slice(2, -2).split(":");
   const base = SHORTCUTS[name!];

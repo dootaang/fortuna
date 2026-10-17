@@ -4,7 +4,7 @@ import { GAMES, GAME_CONTENT, LEDGER_GROUPS, LEDGER_LABELS, replayWager, wagerTr
 import { refs } from "@fortuna/data";
 import { useLiveQuery, type Row } from "../session/live.ts";
 import { Coins, Empty, Notice, cx, formatDate } from "../ui/kit.tsx";
-import { describeEntry } from "../pages/WalletPage.tsx";
+import { describeEntry } from "../pages/HomePage.tsx";
 import { SectionTitle, useDealer } from "./DealerApp.tsx";
 
 type Audit = "ok" | "mismatch" | "error";

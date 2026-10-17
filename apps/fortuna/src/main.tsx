@@ -1,10 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, RouterProvider } from "react-router";
+import { Navigate, createBrowserRouter, RouterProvider } from "react-router";
 import "./styles.css";
 import { ToastProvider } from "./ui/kit.tsx";
 import { PlayerRoot } from "./pages/PlayerRoot.tsx";
-import { Lobby } from "./pages/Lobby.tsx";
 import { RouteError } from "./pages/RouteError.tsx";
 import { installSound } from "./fx/sound.ts";
 
@@ -19,7 +18,7 @@ const router = createBrowserRouter([
     element: <PlayerRoot />,
     errorElement: <RouteError />,
     children: [
-      { index: true, element: <Lobby /> },
+      { index: true, lazy: page(() => import("./pages/HomePage.tsx")) },
       { path: "city", lazy: page(() => import("./city/CityPage.tsx")) },
       { path: "work", lazy: page(() => import("./pages/WorkHub.tsx")) },
       { path: "work/:template", lazy: page(() => import("./work/WorkShift.tsx")) },
@@ -32,8 +31,9 @@ const router = createBrowserRouter([
       { path: "skills", lazy: page(() => import("./pages/SkillsPage.tsx")) },
       { path: "pvp/:roomId", lazy: page(() => import("./pvp/PvpRoomPage.tsx")) },
       { path: "shop", lazy: page(() => import("./pages/ShopPage.tsx")) },
-      { path: "wallet", lazy: page(() => import("./pages/WalletPage.tsx")) },
-      { path: "*", element: <Lobby /> },
+      // 예전 지갑 화면은 홈으로 합쳐졌다.
+      { path: "wallet", element: <Navigate to="/" replace /> },
+      { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
 ]);

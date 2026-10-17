@@ -6,7 +6,6 @@ import {
 import type { Timestamp } from "firebase/firestore";
 import { usePlayer } from "../session/player.tsx";
 import { Frame, PageTitle, cx } from "../ui/kit.tsx";
-import { VenueTabs } from "../pages/VenueList.tsx";
 import { CoinBadge, FearGreedGauge, priceText } from "./pieces.tsx";
 import { latestReports, useFundamentals, useInfoRequests, useMarketConfig, useRateEvents, useReports, useStats, useTape } from "./useMarket.ts";
 import { useState } from "react";
@@ -34,7 +33,6 @@ export default function InfoPage() {
 
   return (
     <div>
-      <VenueTabs active="market" />
       <Link to="/market" className="btn btn-ghost btn-sm mb-3">← 시세판</Link>
       <PageTitle eyebrow="MARKET INFO" title="시장 정보" line="실적, 리포트, 일정. 진짜 기준가는 아무도 말해 주지 않는다." />
 

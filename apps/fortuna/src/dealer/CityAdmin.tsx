@@ -207,14 +207,14 @@ function ContestDesk({ place, contest, speaker, sessionId, onError }: {
     return (
       <Frame>
         <SectionTitle title="맞붙기" />
-        <p className="mb-2 text-xs text-mist">열어 두면 플레이어가 특기 탭에서 「걸기」를 켜고 결제한 특기가 점수판에 오릅니다. 상대(보스)의 점수는 딜러가 정합니다. 여는 것과 결과는 디스코드에 올라갑니다.</p>
+        <p className="mb-2 text-xs text-mist">열어 두면 플레이어가 웹앱 위쪽 ⚔(특기) 단추에서 「걸기」를 켜고 결제한 특기가 점수판에 오릅니다. 상대(보스)의 점수는 딜러가 정합니다. 여는 것과 결과는 디스코드에 올라갑니다.</p>
         <div className="grid gap-2 sm:grid-cols-2">
           <TextField label="제목" value={title} onChange={setTitle} placeholder="흑전각 앞 결투" maxLength={80} />
           <TextField label="상대 (비우면 플레이어끼리)" value={boss} onChange={setBoss} placeholder="천마" maxLength={40} />
         </div>
         <button type="button" className="btn btn-gold btn-sm mt-2" disabled={busy} onClick={() => void run(async () => {
           await openContest(session, place, title, boss);
-          await tell(`⚔️ **맞붙기 — ${title.trim() || "맞붙기"}**${boss.trim() ? ` · 상대: ${boss.trim()}` : ""}\n웹앱 특기 탭에서 「걸기」를 켜고 결제하면 점수로 오릅니다.`);
+          await tell(`⚔️ **맞붙기 — ${title.trim() || "맞붙기"}**${boss.trim() ? ` · 상대: ${boss.trim()}` : ""}\n웹앱 위쪽 ⚔(특기) 단추에서 「걸기」를 켜고 결제하면 점수로 오릅니다.`);
           setTitle(""); setBoss("");
         })}>맞붙기 열기</button>
         <FightOpener place={place} />

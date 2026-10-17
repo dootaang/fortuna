@@ -1,34 +1,69 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router";
 import { getDoc, limit, orderBy, query, where, type Timestamp } from "firebase/firestore";
-import { LEDGER_LABELS, TEXT, usesLeft, type LedgerEntry } from "@fortuna/core";
+import { GAME_CONTENT, LEDGER_LABELS, TEXT, periodIndexAt, periodStartMs, periodWords, usesLeft, type LedgerEntry } from "@fortuna/core";
 import { cityRefs, depositJoint, friendlyError, refs, repayDebt, repayFor, useItem, type InventoryDoc } from "@fortuna/data";
 import { usePlayer } from "../session/player.tsx";
 import { useLiveQuery, type Row } from "../session/live.ts";
-import { Coins, Empty, Frame, Modal, NumberField, PageTitle, Stat, cx, formatDate, useAction } from "../ui/kit.tsx";
+import { Coins, Empty, Frame, Modal, NumberField, Ornament, Stat, cx, formatDate, useAction } from "../ui/kit.tsx";
 import { relay } from "../relay.ts";
 import { FundsSection } from "./Funds.tsx";
 import { HoldingsList } from "../market/HoldingsList.tsx";
 
-export default function WalletPage() {
-  const { wallet, config, session, player } = usePlayer();
+/** 홈: 예전 로비와 지갑을 합친 화면. 내 상태(잔액·빚·남은 횟수), 진행 중인 판, 빚 갚기, 모금함, 가방, 내역. */
+export default function HomePage() {
+  const { wallet, config, session, player, content, vault } = usePlayer();
   const now = session.clock.now();
+  const nextReset = periodStartMs(periodIndexAt(now, config.limitPeriod) + 1, config.limitPeriod);
+  const words = periodWords(config.limitPeriod);
+  const open = wallet.openWager;
   return (
     <div className="space-y-4">
-      <PageTitle eyebrow="WALLET" title={`${player.name}의 지갑`} />
-      <Frame>
+      <section className="sunburst -mx-4 px-4 pb-4 pt-2 text-center rise">
+        <p className="deco-caps">{content.emblem} {content.name} 구역</p>
+        <h1 className="deco-title mt-1 text-[1.8rem] leading-snug">{player.name}</h1>
+      </section>
+
+      {open && (
+        <Link to={`/table/${open.venue}/${open.game}`} className="block">
+          <Frame className="border-gold-300 pulse-gold">
+            <p className="deco-caps">진행 중인 판</p>
+            <p className="mt-1 font-bold">{GAME_CONTENT[open.game].icon} {GAME_CONTENT[open.game].title} · 판돈 <Coins value={open.bet} /></p>
+          </Frame>
+        </Link>
+      )}
+
+      <Frame className="rise">
         <div className="grid grid-cols-2 gap-y-2 sm:grid-cols-4 sm:divide-x sm:divide-gold-400/20">
           <Stat label={TEXT.wallet.balance} tone="gold"><Coins value={wallet.balance} /></Stat>
-          <Stat label={TEXT.wallet.debt} tone={wallet.debt ? "ruby" : "jade"}><span className="num">{wallet.debt.toLocaleString("ko-KR")}</span></Stat>
-          <Stat label={TEXT.wallet.workLeft}><span className="num">{usesLeft(wallet, config, "work", now)}</span></Stat>
-          <Stat label={TEXT.wallet.gambleLeft}><span className="num">{usesLeft(wallet, config, "gamble", now)}</span></Stat>
+          <Stat label={TEXT.wallet.debt} tone={wallet.debt > 0 ? "ruby" : "jade"}><span className="num">{wallet.debt.toLocaleString("ko-KR")}</span></Stat>
+          <Stat label={`${words.now} 남은 일`}><span className="num">{usesLeft(wallet, config, "work", now)}</span><span className="text-sm text-mist"> / {config.work.limit}</span></Stat>
+          <Stat label={`${words.now} 남은 판`}><span className="num">{usesLeft(wallet, config, "gamble", now)}</span><span className="text-sm text-mist"> / {config.gambling.limit}</span></Stat>
         </div>
+        <p className="mt-3 text-center text-xs text-mist">다음 초기화: {formatDate(nextReset)} ({words.reset})</p>
       </Frame>
-      <HoldingsList />
+
+      {config.shopEnabled && (
+        <Link to="/shop" className="group block">
+          <Frame as="div" className="flex items-center gap-3 transition group-hover:border-gold-300">
+            <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-gold-400/60 bg-ink/60 text-lg text-gold-300">✧</span>
+            <span className="min-w-0"><span className="deco-title block text-lg">{TEXT.lobby.shop}</span><span className="block text-sm text-gold-300">소문 · 소모품 · 도전권</span></span>
+          </Frame>
+        </Link>
+      )}
+
       <Repay />
       <RepayFriends />
-      <JointWallet />
+      <HoldingsList />
       <FundsSection />
+      <JointWallet />
       <Inventory />
+      <Frame>
+        <Ornament label="CITY" />
+        <div className="mt-3 text-center">
+          <p className="text-xs text-mist">지배인 금고</p><p className="deco-title text-xl"><Coins value={vault?.amount ?? 0} /></p>
+        </div>
+      </Frame>
       <History />
     </div>
   );

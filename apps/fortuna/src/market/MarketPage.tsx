@@ -5,7 +5,6 @@ import { usePlayer } from "../session/player.tsx";
 import { cue } from "../fx/cues.ts";
 import { Coins, Frame, Notice, PageTitle, cx, formatDate, useAction, useToast } from "../ui/kit.tsx";
 import { claimDividend } from "@fortuna/data";
-import { VenueTabs } from "../pages/VenueList.tsx";
 import { PositionCard } from "./Positions.tsx";
 import { HoldingsList } from "./HoldingsList.tsx";
 import { CoinBadge, FearGreedGauge, FlapText, LongShortBar, Sparkline, changeText, priceText } from "./pieces.tsx";
@@ -47,7 +46,6 @@ export default function MarketPage() {
 
   return (
     <div>
-      <VenueTabs active="market" />
       <PageTitle eyebrow="EXCHANGE STREET" title="환전가 거래소" line="휠 광장 환전가. 구역마다 시세가 있고, 모자란 돈은 지배인이 빌려준다." />
 
       {!exists || !market.enabled ? (

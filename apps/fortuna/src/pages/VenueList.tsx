@@ -4,14 +4,13 @@ import { usePlayer } from "../session/player.tsx";
 import { PvpLobby } from "../pvp/PvpLobby.tsx";
 import { Frame, Notice, PageTitle, cx } from "../ui/kit.tsx";
 
-/** 도박장 안의 세 곳: 뒷골목, 하우스, 환전가 거래소. */
-export function VenueTabs({ active }: { active: Venue | "market" }) {
+/** 도박장 안의 두 곳: 뒷골목, 하우스. (환전가 거래소는 하단 메뉴에 따로 있다.) */
+export function VenueTabs({ active }: { active: Venue }) {
   const { config } = usePlayer();
   return (
-    <div className="mb-4 grid grid-cols-3 gap-2">
+    <div className="mb-4 grid grid-cols-2 gap-2">
       <Link to="/alley" className={cx("btn btn-sm min-h-11", active === "alley" ? "btn-gold" : "btn-ghost")}>♣ {TEXT.lobby.alley}</Link>
       <Link to="/house" className={cx("btn btn-sm min-h-11", active === "house" ? "btn-gold" : "btn-ghost")}>{config.gambling.houseOpen ? "♛" : "🔒"} {TEXT.lobby.house}</Link>
-      <Link to="/market" className={cx("btn btn-sm min-h-11", active === "market" ? "btn-gold" : "btn-ghost")}>📈 거래소</Link>
     </div>
   );
 }

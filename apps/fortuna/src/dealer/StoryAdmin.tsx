@@ -326,7 +326,7 @@ export function FightOpener({ place }: { place: PlaceId }) {
     <details className="mt-3 rounded-sm border border-[#c4473a]/40 p-2">
       <summary className="cursor-pointer text-sm text-[#f2b3aa]">간부전 · 최종전 열기 (라운드제)</summary>
       <p className="my-2 text-xs text-mist">
-        라운드마다 보스 점수를 걸고, 플레이어가 특기 탭에서 「걸기」를 켜고 결제합니다(우리 편 = 이번 판 최고 점수 + 조력). 진행은 디스코드에 그대로 올라갑니다. 「웃돈 +1」은 보스 금고에서 특기 비용표만큼 빠집니다.
+        라운드마다 보스 점수를 걸고, 플레이어가 웹앱 위쪽 ⚔(특기) 단추에서 「걸기」를 켜고 결제합니다(우리 편 = 이번 판 최고 점수 + 조력). 진행은 디스코드에 그대로 올라갑니다. 「웃돈 +1」은 보스 금고에서 특기 비용표만큼 빠집니다.
         최종전은 웃돈마다 지배인이 장부를 한 쪽 넘기고, 백지 쪽이면 불발입니다. 조력 카드는 해방 + 담보 단서를 모두 갖춘 구역 것만 나옵니다.
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -349,7 +349,7 @@ export function FightOpener({ place }: { place: PlaceId }) {
         onClick={() => void run(async () => {
           const bossName = boss.trim() || (mode === "final" ? "지배인" : "보스");
           await openFight(session, place, { title: "", bossName, mode, district: mode === "boss" ? district : null, rounds, bossVault: vault });
-          await tell(`⚔️ **${mode === "final" ? "최종전" : "간부전"} — ${bossName}**\n${rounds}판 ${winsNeeded(rounds)}선승. 웹앱 특기 탭에서 「걸기」를 켜고 결제하면 이번 판 우리 편 점수가 됩니다.`);
+          await tell(`⚔️ **${mode === "final" ? "최종전" : "간부전"} — ${bossName}**\n${rounds}판 ${winsNeeded(rounds)}선승. 웹앱 위쪽 ⚔(특기) 단추에서 「걸기」를 켜고 결제하면 이번 판 우리 편 점수가 됩니다.`);
         }, "열었습니다.")}>
         {mode === "final" ? "최종전 열기" : "간부전 열기"}
       </button>
